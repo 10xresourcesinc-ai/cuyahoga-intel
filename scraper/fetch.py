@@ -205,7 +205,12 @@ class CourtDocketScraper:
 
     # ------------------------------------------------------------------
     def _parse_sheriff_html(self, html: str) -> list[dict]:
-        """Parse the sheriff sale results page."""
+        """
+        Parse the Cuyahoga County Sheriff Sale results page.
+        The table columns are typically:
+        Case Number | Sale Date | Plaintiff | Defendant/Owner |
+        Property Address | Parcel | Appraised Value | Status
+        """
         records = []
         soup = BeautifulSoup(html, "lxml")
 
@@ -213,53 +218,137 @@ class CourtDocketScraper:
             rows = table.find_all("tr")
             if len(rows) < 2:
                 continue
+
+            # Get headers
+            header_row = rows[0]
             headers = [th.get_text(strip=True).lower()
-                       for th in rows[0].find_all(["th","td"])]
-            if not any(k in " ".join(headers)
-                       for k in ["case","sale","parcel","address","plaintiff","defendant","date"]):
+                       for th in header_row.find_all(["th","td"])]
+            header_str = " ".join(headers)
+
+            # Must look like a sheriff sale table
+            if not any(k in header_str for k in
+                       ["case","sale","parcel","address","plaintiff","defendant"]):
                 continue
 
+            # Build column index map from headers
+            col = {}
+            for i, h in enumerate(headers):
+                if any(k in h for k in ["case","cv #","case #","case no"]):
+                    col.setdefault("case_num", i)
+                if any(k in h for k in ["sale date","date of sale","scheduled","filed"]):
+                    col.setdefault("date", i)
+                if "plaintiff" in h or "lender" in h or "bank" in h:
+                    col.setdefault("plaintiff", i)
+                if "defendant" in h or "owner" in h or "debtor" in h:
+                    col.setdefault("defendant", i)
+                if "address" in h or "property" in h or "location" in h:
+                    col.setdefault("address", i)
+                if "parcel" in h and "address" not in h:
+                    col.setdefault("parcel", i)
+                if any(k in h for k in ["appraised","value","amount","judgment"]):
+                    col.setdefault("amount", i)
+
             for row in rows[1:]:
-                cells = [c.get_text(strip=True) for c in row.find_all(["td","th"])]
+                cells = [c.get_text(" ", strip=True) for c in row.find_all(["td","th"])]
                 if len(cells) < 3:
                     continue
 
-                def f(*keys):
-                    for k in keys:
-                        for i, h in enumerate(headers):
-                            if k in h and i < len(cells):
-                                return cells[i]
-                    return ""
+                def get(key, default=""):
+                    idx = col.get(key)
+                    if idx is not None and idx < len(cells):
+                        return cells[idx].strip()
+                    return default
 
+                # Positional fallback if headers didn't map well
+                # Cuyahoga sheriff sale typical order:
+                # 0=CaseNum, 1=SaleDate, 2=Plaintiff, 3=Defendant,
+                # 4=Address, 5=Parcel, 6=AppraisedValue, 7=Status
+                if not col:
+                    case_num  = cells[0] if len(cells) > 0 else ""
+                    sale_date = cells[1] if len(cells) > 1 else ""
+                    plaintiff = cells[2] if len(cells) > 2 else ""
+                    defendant = cells[3] if len(cells) > 3 else ""
+                    address   = cells[4] if len(cells) > 4 else ""
+                    parcel    = cells[5] if len(cells) > 5 else ""
+                    amount    = cells[6] if len(cells) > 6 else ""
+                else:
+                    case_num  = get("case_num")
+                    sale_date = get("date")
+                    plaintiff = get("plaintiff")
+                    defendant = get("defendant")
+                    address   = get("address")
+                    parcel    = get("parcel")
+                    amount    = get("amount")
+
+                # Clean case number — must look like CV + digits
+                case_match = re.search(r'(CV\s*\d+|\d{2}CV\d+)', case_num, re.I)
+                if case_match:
+                    case_num = case_match.group(1).replace(" ","")
+                elif not case_num:
+                    continue
+
+                # Clean date — extract MM/DD/YYYY pattern
+                date_match = re.search(r'\d{1,2}/\d{1,2}/\d{4}', sale_date)
+                clean_date = date_match.group(0) if date_match else ""
+
+                # Clean address — must have a street number
+                addr_match = re.search(
+                    r'\d+\s+[A-Za-z][A-Za-z0-9\s]{3,40}'
+                    r'(?:ST|AVE|DR|RD|BLVD|LN|CT|PL|WAY|CIR|PKWY|STREET|AVENUE|DRIVE|ROAD|LANE|COURT)',
+                    address, re.I
+                )
+                clean_addr = addr_match.group(0).strip() if addr_match else address[:80] if address else ""
+
+                # Clean zip from address if present
+                zip_match = re.search(r'\b(\d{5})\b', address)
+                clean_zip = zip_match.group(1) if zip_match else ""
+
+                # Clean amount — reject absurd values (parcel numbers mistaken for money)
+                raw_amount = parse_amount(amount)
+                if raw_amount and raw_amount > 50_000_000:
+                    raw_amount = None  # parcel number, not a dollar amount
+
+                # Clean owner name — remove junk
+                clean_owner = defendant.strip()
+                # If it looks like a case number or address, discard
+                if re.match(r'^(CV|IF NOT|PARCEL|CASE|703|812|\d{3}-)', clean_owner, re.I):
+                    clean_owner = ""
+
+                # Clean plaintiff
+                clean_plaintiff = plaintiff.strip()
+                if re.match(r'^(CV|IF NOT|PARCEL|CASE|\d{3}-)', clean_plaintiff, re.I):
+                    clean_plaintiff = ""
+
+                # Build clerk URL
                 link_tag = row.find("a", href=True)
                 href = link_tag["href"] if link_tag else ""
-                case_url = href if href.startswith("http") else f"{COURT_URL}/{href.lstrip('/')}" if href else ""
+                if href and not href.startswith("http"):
+                    href = f"{COURT_URL}/{href.lstrip('/')}"
 
-                case_num  = f("case","cv","number","no")
-                sale_date = fmt_date(f("sale","date","filed","scheduled"))
-                address   = f("address","property","parcel","location")
-                plaintiff = f("plaintiff","lender","bank","mortgag")
-                defendant = f("defendant","owner","debtor","borrower")
-                amount    = f("amount","appraised","value","debt","balance")
-
-                if not case_num and not sale_date:
-                    continue
+                # Filter by date range
+                if clean_date:
+                    try:
+                        dt = datetime.strptime(clean_date, "%m/%d/%Y")
+                        if dt < self.date_from:
+                            continue
+                    except Exception:
+                        pass
 
                 records.append({
                     "doc_num":      case_num,
                     "doc_type":     "NOFC",
                     "cat":          "NOFC",
                     "cat_label":    "Notice of Foreclosure",
-                    "filed":        sale_date,
-                    "owner":        defendant,
-                    "grantee":      plaintiff,
-                    "amount":       parse_amount(amount),
-                    "legal":        "",
-                    "clerk_url":    case_url,
-                    "prop_address": address,
+                    "filed":        clean_date,
+                    "owner":        clean_owner,
+                    "grantee":      clean_plaintiff,
+                    "amount":       raw_amount,
+                    "legal":        parcel,
+                    "clerk_url":    href,
+                    "prop_address": clean_addr,
                     "prop_city":    "Cleveland",
                     "prop_state":   "OH",
-                    "prop_zip":     "",
+                    "prop_zip":     clean_zip,
                     "mail_address": "",
                     "mail_city":    "",
                     "mail_state":   "OH",
@@ -568,7 +657,7 @@ class ParcelLookup:
     def _load_gis(self, session) -> int:
         # Try multiple known Cuyahoga County GIS endpoints
         urls = [
-            "https://data-cuyahoga.opendata.arcgis.com/datasets/ffaaa1651d5540419469375d680f3245_0/query",
+            "https://gis.cuyahogacounty.gov/arcgis/rest/services/OpenData/Parcels/FeatureServer/0/query",
             "https://gis.cuyahogacounty.us/arcgis/rest/services/OpenData/Parcels/FeatureServer/0/query",
             "https://gis.cuyahogacounty.gov/arcgis/rest/services/Parcels/FeatureServer/0/query",
         ]
