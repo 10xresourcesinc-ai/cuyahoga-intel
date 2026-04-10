@@ -568,7 +568,7 @@ class ParcelLookup:
     def _load_gis(self, session) -> int:
         # Try multiple known Cuyahoga County GIS endpoints
         urls = [
-            "https://gis.cuyahogacounty.gov/arcgis/rest/services/OpenData/Parcels/FeatureServer/0/query",
+            "https://data-cuyahoga.opendata.arcgis.com/datasets/ffaaa1651d5540419469375d680f3245_0/query",
             "https://gis.cuyahogacounty.us/arcgis/rest/services/OpenData/Parcels/FeatureServer/0/query",
             "https://gis.cuyahogacounty.gov/arcgis/rest/services/Parcels/FeatureServer/0/query",
         ]
