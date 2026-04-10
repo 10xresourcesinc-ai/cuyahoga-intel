@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Cuyahoga County Leads</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d0f14;--surface:#14171f;--s2:#1c2030;--border:#2a2f3f;
+  --accent:#f97316;--blue:#3b82f6;--ok:#22c55e;--warn:#eab308;--danger:#ef4444;
+  --text:#e2e8f0;--muted:#64748b;
+  --mono:"IBM Plex Mono",monospace;--sans:"DM Sans",sans-serif;--display:"Syne",sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;min-height:100vh}
+header{background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;display:flex;align-items:center;gap:12px;height:60px;position:sticky;top:0;z-index:100}
+.logo{font-family:var(--display);font-size:18px;font-weight:800;color:var(--accent)}
+.logo span{color:var(--text)}
+.pill{font-family:var(--mono);font-size:11px;color:var(--muted);background:var(--s2);border:1px solid var(--border);border-radius:20px;padding:3px 10px}
+.spacer{flex:1}
+#ts{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.layout{display:grid;grid-template-columns:210px 1fr;min-height:calc(100vh - 60px)}
+aside{background:var(--surface);border-right:1px solid var(--border);padding:16px 0;position:sticky;top:60px;height:calc(100vh - 60px);overflow-y:auto}
+.slabel{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);padding:8px 16px 4px}
+.chip{display:flex;align-items:center;justify-content:space-between;padding:7px 16px;cursor:pointer;font-size:13px;border:1px solid transparent;margin:1px 8px;border-radius:6px;transition:background .15s}
+.chip:hover{background:var(--s2)}
+.chip.on{background:color-mix(in srgb,var(--accent) 15%,transparent);border-color:color-mix(in srgb,var(--accent) 40%,transparent);color:var(--accent)}
+.cnt{font-family:var(--mono);font-size:11px;color:var(--muted);background:var(--s2);border-radius:10px;padding:1px 7px}
+.chip.on .cnt{color:var(--accent)}
+.hr{height:1px;background:var(--border);margin:8px 16px}
+.score-wrap{padding:0 16px 8px}
+.score-wrap label{font-size:12px;color:var(--muted);display:flex;justify-content:space-between;margin-bottom:4px}
+.score-wrap label span{color:var(--text);font-family:var(--mono)}
+input[type=range]{width:100%;accent-color:var(--accent)}
+main{padding:20px}
+.dropzone{border:2px dashed var(--border);border-radius:8px;padding:18px 20px;margin-bottom:20px;display:flex;align-items:center;gap:14px;cursor:pointer;background:var(--surface);transition:border-color .2s,background .2s;flex-wrap:wrap}
+.dropzone:hover,.dropzone.over{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 5%,transparent)}
+.dropzone strong{display:block;margin-bottom:2px}
+.dropzone span{font-size:12px;color:var(--muted)}
+.dz-flex{flex:1}
+.dz-btn{padding:8px 16px;background:var(--accent);color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--sans)}
+.prog{display:none;width:100%;margin-top:8px}
+.prog.show{display:block}
+.bar-bg{height:4px;background:var(--border);border-radius:2px;overflow:hidden}
+.bar{height:100%;background:var(--accent);border-radius:2px;transition:width .3s;width:0}
+.pstat{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:4px}
+#finput{display:none}
+.stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(135px,1fr));gap:10px;margin-bottom:20px}
+.sc{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 14px}
+.sc .lbl{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
+.sc .val{font-family:var(--display);font-size:24px;font-weight:800;color:var(--accent);line-height:1.2}
+.sc .sub{font-size:11px;color:var(--muted)}
+.toolbar{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center}
+.search{flex:1;min-width:160px;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none}
+.search:focus{border-color:var(--accent)}
+.search::placeholder{color:var(--muted)}
+select.sel{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:13px;outline:none}
+.btn{padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--s2);color:var(--text);font-size:13px;cursor:pointer;font-family:var(--sans)}
+.btn:hover{background:var(--border)}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.btn.red{background:color-mix(in srgb,var(--danger) 15%,transparent);border-color:color-mix(in srgb,var(--danger) 30%,transparent);color:var(--danger)}
+.rcount{font-family:var(--mono);font-size:12px;color:var(--muted);margin-bottom:10px}
+.rcount span{color:var(--text)}
+.tw{overflow-x:auto;border:1px solid var(--border);border-radius:8px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+thead th{background:var(--s2);color:var(--muted);font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.8px;padding:10px 12px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap}
+tbody tr{border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s}
+tbody tr:last-child{border-bottom:none}
+tbody tr:hover{background:var(--s2)}
+td{padding:9px 12px;vertical-align:middle;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sb{font-family:var(--mono);font-size:13px;font-weight:600;padding:3px 8px;border-radius:6px;display:inline-block;min-width:34px;text-align:center}
+.sh{background:color-mix(in srgb,var(--ok) 15%,transparent);color:var(--ok);border:1px solid color-mix(in srgb,var(--ok) 30%,transparent)}
+.sm{background:color-mix(in srgb,var(--warn) 15%,transparent);color:var(--warn);border:1px solid color-mix(in srgb,var(--warn) 30%,transparent)}
+.sl{background:color-mix(in srgb,var(--muted) 15%,transparent);color:var(--muted);border:1px solid var(--border)}
+.tb{font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:4px;border:1px solid var(--border);background:var(--s2)}
+.tLP,.tRELLP{border-color:#7c3aed66;color:#a78bfa;background:#7c3aed18}
+.tNOFC{border-color:#ef444466;color:#f87171;background:#ef444418}
+.tTAXDEED{border-color:#f9731666;color:#fb923c;background:#f9731618}
+.tJUD{border-color:#eab30866;color:#facc15;background:#eab30818}
+.tLIEN{border-color:#3b82f666;color:#60a5fa;background:#3b82f618}
+.tPRO{border-color:#22c55e66;color:#4ade80;background:#22c55e18}
+.fp{display:inline-block;font-size:10px;padding:1px 6px;border-radius:3px;margin:1px 2px 1px 0;border:1px solid var(--border);color:var(--muted)}
+.sbadge{font-family:var(--mono);font-size:9px;padding:1px 5px;border-radius:3px;margin-left:4px}
+.sauto{background:#1e3a5f;color:#60a5fa;border:1px solid #1d4ed844}
+.sman{background:#1a3320;color:#4ade80;border:1px solid #16a34a44}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;opacity:0;pointer-events:none;transition:opacity .2s}
+.overlay.open{opacity:1;pointer-events:all}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(500px,95vw);background:var(--surface);border-left:1px solid var(--border);z-index:201;overflow-y:auto;padding:24px;transform:translateX(100%);transition:transform .25s}
+.drawer.open{transform:translateX(0)}
+.dclose{position:absolute;top:16px;right:16px;background:var(--s2);border:1px solid var(--border);border-radius:50%;width:28px;height:28px;cursor:pointer;color:var(--text);font-size:14px;display:flex;align-items:center;justify-content:center}
+.drawer h2{font-family:var(--display);font-size:18px;font-weight:800;margin-bottom:6px;padding-right:36px}
+.dsec{margin-bottom:18px}
+.dsect{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--border)}
+.dgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.df label{font-size:10px;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:1px}
+.df .v{font-size:13px;word-break:break-word}
+.df .v.m{font-family:var(--mono)}
+.dflags{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+.dflag{font-size:12px;padding:3px 9px;border-radius:4px;border:1px solid var(--border);background:var(--s2)}
+.pages{display:flex;align-items:center;justify-content:flex-end;gap:5px;margin-top:14px;flex-wrap:wrap}
+.pb{padding:5px 10px;border-radius:5px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-family:var(--mono);font-size:12px;cursor:pointer}
+.pb:hover{background:var(--s2)}
+.pb.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.pb:disabled{opacity:.4;cursor:default}
+.empty{text-align:center;padding:60px 20px;color:var(--muted)}
+.empty h3{color:var(--text);margin-bottom:8px}
+.spin{width:34px;height:34px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:sp .8s linear infinite;margin:0 auto 14px}
+@keyframes sp{to{transform:rotate(360deg)}}
+.loading{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:50vh}
+.toast{position:fixed;bottom:20px;right:20px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 16px;font-size:13px;z-index:999;transform:translateY(60px);opacity:0;transition:all .3s}
+.toast.show{transform:translateY(0);opacity:1}
+.toast.ok{border-color:var(--ok);color:var(--ok)}
+.toast.err{border-color:var(--danger);color:var(--danger)}
+@media(max-width:700px){.layout{grid-template-columns:1fr}aside{display:none}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">CUYAHOGA <span>LEADS</span></div>
+  <div class="pill">Court Docket</div>
+  <div class="pill">Recorder PDF</div>
+  <div class="spacer"></div>
+  <div id="ts">Loading...</div>
+</header>
+<div class="layout">
+  <aside>
+    <div class="slabel">Lead Type</div>
+    <div id="catfilters"></div>
+    <div class="hr"></div>
+    <div class="slabel">Source</div>
+    <div class="chip" id="autoChip"><span>Auto (court)</span><span class="cnt" id="autoCnt">0</span></div>
+    <div class="chip" id="manChip"><span>Manual (PDF)</span><span class="cnt" id="manCnt">0</span></div>
+    <div class="hr"></div>
+    <div class="slabel">Min Score</div>
+    <div class="score-wrap">
+      <label>Score &ge; <span id="sv">0</span></label>
+      <input type="range" id="sr" min="0" max="100" value="0"/>
+    </div>
+    <div class="hr"></div>
+    <div class="slabel">Filters</div>
+    <div class="chip" id="addrChip"><span>Has address</span><span class="cnt" id="addrCnt">0</span></div>
+    <div class="chip" id="newChip"><span>New this week</span><span class="cnt" id="newCnt">0</span></div>
+  </aside>
+  <main>
+    <div class="dropzone" id="dz">
+      <div style="font-size:26px">📄</div>
+      <div class="dz-flex">
+        <strong>Upload Recorder PDF &mdash; drag &amp; drop or click</strong>
+        <span>Download from cuyahoga.oh.publicsearch.us &rarr; drag here &rarr; auto-imported</span>
+      </div>
+      <button class="dz-btn" onclick="document.getElementById('finput').click()">Choose PDF</button>
+      <input type="file" id="finput" accept=".pdf" multiple/>
+      <div class="prog" id="prog"><div class="bar-bg"><div class="bar" id="bar"></div></div><div class="pstat" id="pstat">Parsing...</div></div>
+    </div>
+    <div class="stats">
+      <div class="sc"><div class="lbl">Total Leads</div><div class="val" id="stTotal">0</div><div class="sub">combined</div></div>
+      <div class="sc"><div class="lbl">Auto (Court)</div><div class="val" id="stAuto">0</div><div class="sub">daily scrape</div></div>
+      <div class="sc"><div class="lbl">Manual (PDF)</div><div class="val" id="stMan">0</div><div class="sub">uploaded</div></div>
+      <div class="sc"><div class="lbl">Score &ge;70</div><div class="val" id="stHot">0</div><div class="sub">hot leads</div></div>
+      <div class="sc"><div class="lbl">Date Range</div><div class="val" id="stRange" style="font-size:13px;line-height:1.4">—</div><div class="sub">lookback</div></div>
+    </div>
+    <div class="toolbar">
+      <input class="search" type="search" id="q" placeholder="Search owner, address, doc #..."/>
+      <select class="sel" id="sortSel">
+        <option value="score_d">Score &darr;</option>
+        <option value="score_a">Score &uarr;</option>
+        <option value="date_d">Filed (newest)</option>
+        <option value="date_a">Filed (oldest)</option>
+        <option value="amt_d">Amount &darr;</option>
+      </select>
+      <button class="btn" id="resetBtn">Reset</button>
+      <button class="btn red" id="clearBtn">Clear PDFs</button>
+      <button class="btn pri" id="exportBtn">Export CSV</button>
+    </div>
+    <div class="rcount"><span id="rc">0</span> records shown</div>
+    <div class="tw" id="tw"><div class="loading"><div class="spin"></div><div style="color:var(--muted)">Loading...</div></div></div>
+    <div class="pages" id="pages"></div>
+  </main>
+</div>
+<div class="overlay" id="ov"></div>
+<div class="drawer" id="dr"><button class="dclose" id="dc">&#x2715;</button><div id="dc2"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+if(typeof pdfjsLib!=="undefined"){pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";}
+
+var AUTO=[],MAN=[],filtered=[],page=1,PS=50;
+var cats=new Set(),minSc=0,addrOnly=false,newOnly=false,autoOnly=false,manOnly=false,sortK="score_d",qStr="";
+var CAT={LP:"Lis Pendens",NOFC:"Foreclosure",TAXDEED:"Tax Deed",JUD:"Judgment",LIEN:"Lien",PRO:"Probate",NOC:"NOC",RELLP:"Rel LP"};
+
+function getSaved(){try{return JSON.parse(localStorage.getItem("man_recs")||"[]");}catch(e){return[];}}
+function saveMAN(){try{localStorage.setItem("man_recs",JSON.stringify(MAN));}catch(e){}}
+
+async function init(){
+  MAN=getSaved();
+  try{
+    var r=await fetch("records.json?_="+Date.now());
+    var j=await r.json();
+    AUTO=j.records||[];
+    document.getElementById("ts").textContent=j.fetched_at?"Updated: "+new Date(j.fetched_at).toLocaleString():"No auto data";
+    if(j.date_range){document.getElementById("stRange").textContent=(j.date_range.from||"")+" - "+(j.date_range.to||"");}
+  }catch(e){document.getElementById("ts").textContent="No auto data";}
+  render();
+}
+
+function merge(){
+  var seen={},all=AUTO.concat(MAN);
+  for(var i=0;i<all.length;i++){
+    var r=all[i],k=r.doc_num||r.clerk_url||("r"+i);
+    if(!seen[k]||(r.score||0)>(seen[k].score||0))seen[k]=r;
+  }
+  return Object.values(seen);
+}
+
+function render(){
+  var all=merge();
+  var auto=all.filter(function(r){return r.source!=="Manual Upload";}).length;
+  var man=all.filter(function(r){return r.source==="Manual Upload";}).length;
+  document.getElementById("stTotal").textContent=all.length;
+  document.getElementById("stAuto").textContent=auto;
+  document.getElementById("stMan").textContent=man;
+  document.getElementById("stHot").textContent=all.filter(function(r){return (r.score||0)>=70;}).length;
+  document.getElementById("autoCnt").textContent=auto;
+  document.getElementById("manCnt").textContent=man;
+  document.getElementById("addrCnt").textContent=all.filter(function(r){return r.prop_address||r.mail_address;}).length;
+  document.getElementById("newCnt").textContent=all.filter(function(r){return (r.flags||[]).indexOf("New this week")>=0;}).length;
+  buildCats(all);
+  applyFilters();
+}
+
+function buildCats(all){
+  var counts={};
+  all.forEach(function(r){var k=r.cat||"OTHER";counts[k]=(counts[k]||0)+1;});
+  var c=document.getElementById("catfilters");c.innerHTML="";
+  var all2=document.createElement("div");
+  all2.className="chip on";all2.dataset.cat="ALL";
+  all2.innerHTML="<span>All types</span><span class='cnt'>"+all.length+"</span>";
+  all2.onclick=function(){cats.clear();document.querySelectorAll("#catfilters .chip").forEach(function(x){x.classList.remove("on");});all2.classList.add("on");page=1;applyFilters();};
+  c.appendChild(all2);
+  Object.keys(counts).sort(function(a,b){return counts[b]-counts[a];}).forEach(function(cat){
+    var el=document.createElement("div");el.className="chip";
+    el.innerHTML="<span>"+(CAT[cat]||cat)+"</span><span class='cnt'>"+counts[cat]+"</span>";
+    el.onclick=function(){
+      document.querySelector("#catfilters .chip").classList.remove("on");
+      if(cats.has(cat)){cats.delete(cat);el.classList.remove("on");}
+      else{cats.add(cat);el.classList.add("on");}
+      if(cats.size===0)document.querySelector("#catfilters .chip").classList.add("on");
+      page=1;applyFilters();
+    };
+    c.appendChild(el);
+  });
+}
+
+function applyFilters(){
+  var all=merge();
+  if(cats.size>0)all=all.filter(function(r){return cats.has(r.cat);});
+  if(minSc>0)all=all.filter(function(r){return (r.score||0)>=minSc;});
+  if(addrOnly)all=all.filter(function(r){return r.prop_address||r.mail_address;});
+  if(newOnly)all=all.filter(function(r){return (r.flags||[]).indexOf("New this week")>=0;});
+  if(autoOnly)all=all.filter(function(r){return r.source!=="Manual Upload";});
+  if(manOnly)all=all.filter(function(r){return r.source==="Manual Upload";});
+  if(qStr){var q=qStr.toLowerCase();all=all.filter(function(r){return (r.owner||"").toLowerCase().indexOf(q)>=0||(r.prop_address||"").toLowerCase().indexOf(q)>=0||(r.mail_address||"").toLowerCase().indexOf(q)>=0||(r.doc_num||"").toLowerCase().indexOf(q)>=0;});}
+  var pd=function(s){try{return new Date(s).getTime();}catch(e){return 0;}};
+  all.sort(function(a,b){
+    if(sortK==="score_d")return (b.score||0)-(a.score||0);
+    if(sortK==="score_a")return (a.score||0)-(b.score||0);
+    if(sortK==="date_d")return pd(b.filed)-pd(a.filed);
+    if(sortK==="date_a")return pd(a.filed)-pd(b.filed);
+    if(sortK==="amt_d")return (b.amount||0)-(a.amount||0);
+    return 0;
+  });
+  filtered=all;
+  document.getElementById("rc").textContent=all.length;
+  drawTable();
+  drawPages();
+}
+
+function drawTable(){
+  var wrap=document.getElementById("tw");
+  var start=(page-1)*PS,slice=filtered.slice(start,start+PS);
+  if(!filtered.length){wrap.innerHTML='<div class="empty"><h3>No records match</h3><p>Try adjusting filters or upload a recorder PDF.</p></div>';return;}
+  var rows=slice.map(function(r,i){
+    var sc=r.score||0,scl=sc>=70?"sh":sc>=45?"sm":"sl";
+    var catcl="t"+(r.cat||"");
+    var flags=(r.flags||[]).slice(0,3).map(function(f){return '<span class="fp">'+f+'</span>';}).join("");
+    var addr=r.prop_address?(r.prop_address+(r.prop_city?", "+r.prop_city:"")):(r.mail_address?"&#x2709; "+r.mail_address:"<span style='color:var(--muted)'>—</span>");
+    var amt=r.amount?"$"+Number(r.amount).toLocaleString():"—";
+    var lnk=r.clerk_url?'<a style="color:var(--blue);font-family:var(--mono);font-size:11px;text-decoration:none" href="'+r.clerk_url+'" target="_blank" onclick="event.stopPropagation()">&#x2197;</a>':"—";
+    var sbadge=r.source==="Manual Upload"?'<span class="sbadge sman">PDF</span>':'<span class="sbadge sauto">AUTO</span>';
+    return '<tr onclick="openDrawer('+(start+i)+')">'
+      +'<td><span class="sb '+scl+'">'+sc+'</span></td>'
+      +'<td><span class="tb '+catcl+'">'+(r.doc_type||r.cat||"—")+'</span>'+sbadge+'</td>'
+      +'<td style="max-width:150px">'+(r.owner||"—")+'</td>'
+      +'<td>'+(r.filed||"—")+'</td>'
+      +'<td>'+amt+'</td>'
+      +'<td style="max-width:190px">'+addr+'</td>'
+      +'<td style="max-width:200px">'+flags+'</td>'
+      +'<td>'+lnk+'</td>'
+      +'</tr>';
+  });
+  wrap.innerHTML='<table><thead><tr><th>Score</th><th>Type</th><th>Owner</th><th>Filed</th><th>Amount</th><th>Address</th><th>Flags</th><th>Link</th></tr></thead><tbody>'+rows.join("")+'</tbody></table>';
+}
+
+function drawPages(){
+  var total=Math.ceil(filtered.length/PS),p=document.getElementById("pages");
+  if(total<=1){p.innerHTML="";return;}
+  var h='<button class="pb" onclick="gp('+(page-1)+')" '+(page===1?"disabled":"")+'>&#8249;</button>';
+  var lo=Math.max(1,page-2),hi=Math.min(total,page+2);
+  if(lo>1)h+='<button class="pb" onclick="gp(1)">1</button>'+(lo>2?'<span style="color:var(--muted);padding:0 4px">...</span>':"");
+  for(var i=lo;i<=hi;i++)h+='<button class="pb'+(i===page?" on":"")+'" onclick="gp('+i+')">'+i+'</button>';
+  if(hi<total)h+=(hi<total-1?'<span style="color:var(--muted);padding:0 4px">...</span>':"")+'<button class="pb" onclick="gp('+total+')">'+total+'</button>';
+  h+='<button class="pb" onclick="gp('+(page+1)+')" '+(page===total?"disabled":"")+'>&#8250;</button>';
+  p.innerHTML=h;
+}
+function gp(n){page=n;drawTable();drawPages();document.querySelector(".tw").scrollIntoView({behavior:"smooth"});}
+
+function openDrawer(idx){
+  var r=filtered[idx];if(!r)return;
+  var sc=r.score||0,scColor=sc>=70?"var(--ok)":sc>=45?"var(--warn)":"var(--muted)";
+  var amt=r.amount?"$"+Number(r.amount).toLocaleString("en-US",{minimumFractionDigits:2}):"—";
+  var flags=(r.flags||[]).map(function(f){return '<span class="dflag">'+f+'</span>';}).join("");
+  var src=r.source==="Manual Upload"?'<span class="sbadge sman">PDF</span>':'<span class="sbadge sauto">AUTO</span>';
+  document.getElementById("dc2").innerHTML=
+    '<h2>'+(r.cat_label||r.doc_type||"Document")+' '+src+'</h2>'
+    +'<div style="display:flex;align-items:center;gap:12px;margin-bottom:18px">'
+    +'<div style="font-family:var(--display);font-size:34px;font-weight:800;color:'+scColor+'">'+sc+'</div>'
+    +'<div><div style="font-size:11px;color:var(--muted)">Seller Score</div></div></div>'
+    +'<div class="dsec"><div class="dsect">Document</div><div class="dgrid">'
+    +'<div class="df"><label>Doc Number</label><div class="v m">'+(r.doc_num||"—")+'</div></div>'
+    +'<div class="df"><label>Type</label><div class="v">'+(r.doc_type||"—")+'</div></div>'
+    +'<div class="df"><label>Filed</label><div class="v">'+(r.filed||"—")+'</div></div>'
+    +'<div class="df"><label>Amount</label><div class="v m">'+amt+'</div></div>'
+    +'<div class="df"><label>Owner</label><div class="v">'+(r.owner||"—")+'</div></div>'
+    +'<div class="df"><label>Grantee</label><div class="v">'+(r.grantee||"—")+'</div></div>'
+    +'</div></div>'
+    +'<div class="dsec"><div class="dsect">Property Address</div><div class="dgrid">'
+    +'<div class="df"><label>Street</label><div class="v">'+(r.prop_address||"—")+'</div></div>'
+    +'<div class="df"><label>City</label><div class="v">'+(r.prop_city||"—")+'</div></div>'
+    +'<div class="df"><label>State</label><div class="v">'+(r.prop_state||"OH")+'</div></div>'
+    +'<div class="df"><label>Zip</label><div class="v m">'+(r.prop_zip||"—")+'</div></div>'
+    +'</div></div>'
+    +'<div class="dsec"><div class="dsect">Mailing Address</div><div class="dgrid">'
+    +'<div class="df"><label>Street</label><div class="v">'+(r.mail_address||"—")+'</div></div>'
+    +'<div class="df"><label>City</label><div class="v">'+(r.mail_city||"—")+'</div></div>'
+    +'<div class="df"><label>State</label><div class="v">'+(r.mail_state||"—")+'</div></div>'
+    +'<div class="df"><label>Zip</label><div class="v m">'+(r.mail_zip||"—")+'</div></div>'
+    +'</div></div>'
+    +'<div class="dsec"><div class="dsect">Flags</div><div class="dflags">'+(flags||'<span style="color:var(--muted);font-size:12px">None</span>')+'</div></div>'
+    +(r.clerk_url?'<div><a class="btn" href="'+r.clerk_url+'" target="_blank" style="display:inline-block;text-decoration:none">&#x2197; View Record</a></div>':"");
+  document.getElementById("ov").classList.add("open");
+  document.getElementById("dr").classList.add("open");
+}
+function closeDrawer(){document.getElementById("ov").classList.remove("open");document.getElementById("dr").classList.remove("open");}
+document.getElementById("dc").onclick=closeDrawer;
+document.getElementById("ov").onclick=closeDrawer;
+document.addEventListener("keydown",function(e){if(e.key==="Escape")closeDrawer();});
+
+// PDF Upload
+var dz=document.getElementById("dz"),fi=document.getElementById("finput");
+dz.addEventListener("dragover",function(e){e.preventDefault();dz.classList.add("over");});
+dz.addEventListener("dragleave",function(){dz.classList.remove("over");});
+dz.addEventListener("drop",function(e){e.preventDefault();dz.classList.remove("over");var files=Array.from(e.dataTransfer.files).filter(function(f){return f.name.endsWith(".pdf");});if(files.length)processPDFs(files);});
+fi.addEventListener("change",function(e){var files=Array.from(e.target.files);if(files.length)processPDFs(files);fi.value="";});
+
+async function processPDFs(files){
+  var prog=document.getElementById("prog"),bar=document.getElementById("bar"),pstat=document.getElementById("pstat");
+  prog.classList.add("show");bar.style.width="0%";
+  var newRecs=[];
+  for(var i=0;i<files.length;i++){
+    pstat.textContent="Parsing "+files[i].name+" ("+(i+1)+"/"+files.length+")...";
+    bar.style.width=((i/files.length)*80)+"%";
+    try{var recs=await parsePDF(files[i]);newRecs=newRecs.concat(recs);}
+    catch(e){toast("Error: "+e.message,"err");}
+  }
+  bar.style.width="100%";
+  pstat.textContent="Done — "+newRecs.length+" records found";
+  if(newRecs.length>0){
+    var scored=newRecs.map(function(r){var s=scoreRec(r);r.score=s.score;r.flags=s.flags;return r;});
+    MAN=MAN.concat(scored);
+    var seen={};
+    MAN.forEach(function(r){var k=r.doc_num||r.clerk_url||(Math.random()+"");if(!seen[k])seen[k]=r;});
+    MAN=Object.values(seen);
+    saveMAN();
+    toast(newRecs.length+" records imported","ok");
+    render();
+  }else{toast("No records found in PDF","err");}
+  setTimeout(function(){prog.classList.remove("show");bar.style.width="0%";},3000);
+}
+
+async function parsePDF(file){
+  var ab=await file.arrayBuffer();
+  var pdf=await pdfjsLib.getDocument({data:ab}).promise;
+  var recs=[],text="";
+  for(var p=1;p<=pdf.numPages;p++){
+    var pg=await pdf.getPage(p);
+    var ct=await pg.getTextContent();
+    text+=ct.items.map(function(i){return i.str;}).join(" ")+"\n";
+  }
+  var lines=text.split(/\n+/).map(function(l){return l.trim();}).filter(Boolean);
+  var dateRx=/\b(\d{1,2}\/\d{1,2}\/\d{4})\b/;
+  var kws=["LIS PENDENS","FORECLOSURE","TAX DEED","JUDGMENT","LIEN","MECHANIC","FEDERAL","IRS","HOA","PROBATE","COMMENCEMENT","CERTIFICATE"];
+  for(var i=0;i<lines.length;i++){
+    var up=lines[i].toUpperCase();
+    var hasKw=kws.some(function(k){return up.indexOf(k)>=0;});
+    var hasDt=dateRx.test(lines[i]);
+    if(hasKw||hasDt){
+      var win=lines.slice(Math.max(0,i-2),i+8).join(" ");
+      var rec=extractRec(win);
+      if(rec)recs.push(rec);
+      i+=3;
+    }
+  }
+  if(!recs.length){lines.forEach(function(l){if(dateRx.test(l)&&l.length>20){var rec=extractRec(l);if(rec)recs.push(rec);}});}
+  return recs;
+}
+
+function extractRec(text){
+  var dateRx=/\b(\d{1,2}\/\d{1,2}\/\d{4})\b/g;
+  var amtRx=/\$?([\d,]{4,}\.?\d{0,2})/;
+  var parRx=/\b(\d{3}-\d{2}-\d{3})\b/;
+  var dates=[];var m;while((m=dateRx.exec(text))!==null)dates.push(m[1]);
+  var filed=dates[0]||"";
+  var parcel=(text.match(parRx)||[])[1]||"";
+  var amtM=text.match(amtRx);
+  var amount=amtM?parseFloat(amtM[1].replace(/,/g,"")):null;
+  var dt="LN",dc="LIEN",dl="Lien";
+  var u=text.toUpperCase();
+  if(u.indexOf("LIS PENDENS")>=0){dt="LP";dc="LP";dl="Lis Pendens";}
+  else if(u.indexOf("FORECLOSURE")>=0){dt="NOFC";dc="NOFC";dl="Notice of Foreclosure";}
+  else if(u.indexOf("TAX DEED")>=0){dt="TAXDEED";dc="TAXDEED";dl="Tax Deed";}
+  else if(u.indexOf("JUDGMENT")>=0){dt="JUD";dc="JUD";dl="Judgment";}
+  else if(u.indexOf("FEDERAL TAX")>=0||u.indexOf("IRS")>=0){dt="LNFED";dc="LIEN";dl="Federal Tax Lien";}
+  else if(u.indexOf("MECHANIC")>=0){dt="LNMECH";dc="LIEN";dl="Mechanic Lien";}
+  else if(u.indexOf("HOA")>=0){dt="LNHOA";dc="LIEN";dl="HOA Lien";}
+  else if(u.indexOf("PROBATE")>=0){dt="PRO";dc="PRO";dl="Probate";}
+  else if(u.indexOf("COMMENCEMENT")>=0){dt="NOC";dc="NOC";dl="Notice of Commencement";}
+  var addrRx=/\b(\d{2,5}\s+[A-Za-z][A-Za-z\s]{3,30}(?:ST|AVE|DR|RD|BLVD|LN|CT|PL|WAY|CIR)\b)/i;
+  var addrM=text.match(addrRx);
+  var addr=addrM?addrM[1].trim():"";
+  var bf=filed?text.split(filed)[0]:text.substring(0,100);
+  var np=bf.trim().split(/\s{2,}|\t/).map(function(s){return s.trim();}).filter(Boolean);
+  var owner=np[0]||"",grantee=np[1]||"";
+  if(!filed&&!owner&&!addr)return null;
+  return{doc_num:parcel||"PDF-"+Date.now()+"-"+Math.random().toString(36).slice(2,6),doc_type:dt,cat:dc,cat_label:dl,filed:filed,owner:owner,grantee:grantee,amount:amount,legal:"",clerk_url:"",prop_address:addr,prop_city:addr?"Cleveland":"",prop_state:"OH",prop_zip:parcel||"",mail_address:"",mail_city:"",mail_state:"OH",mail_zip:"",source:"Manual Upload"};
+}
+
+function scoreRec(r){
+  var flags=[],pts=30,cat=r.cat||"",dt=r.doc_type||"",owner=r.owner||"",amt=r.amount;
+  var wa=new Date(Date.now()-7*86400000);
+  if(cat==="LP"){flags.push("Lis pendens");pts+=10;}
+  if(cat==="NOFC"){flags.push("Pre-foreclosure");pts+=10;}
+  if(cat==="TAXDEED"){flags.push("Tax deed");pts+=10;}
+  if(cat==="JUD"){flags.push("Judgment lien");pts+=10;}
+  if(cat==="LIEN"){if(["LNIRS","LNFED","LNCORPTX"].indexOf(dt)>=0)flags.push("Tax lien");else if(dt==="LNMECH")flags.push("Mechanic lien");else if(dt==="LNHOA")flags.push("HOA lien");else flags.push("Lien");pts+=10;}
+  if(cat==="PRO"){flags.push("Probate / estate");pts+=10;}
+  if(amt){if(amt>100000){flags.push("High debt (>$100k)");pts+=15;}else if(amt>50000)pts+=10;}
+  try{if(new Date(r.filed)>=wa){flags.push("New this week");pts+=5;}}catch(e){}
+  if(r.prop_address||r.mail_address){flags.push("Address found");pts+=5;}
+  if(/\b(LLC|INC|CORP|LTD|TRUST|ESTATE)\b/i.test(owner)){flags.push("LLC / corp owner");pts+=5;}
+  flags.push("Recorder filing");
+  return{score:Math.min(100,Math.max(0,pts)),flags:Array.from(new Set(flags))};
+}
+
+// Export CSV
+document.getElementById("exportBtn").onclick=function(){
+  var cols=["First Name","Last Name","Mailing Address","Mailing City","Mailing State","Mailing Zip","Property Address","Property City","Property State","Property Zip","Lead Type","Document Type","Date Filed","Document Number","Amount/Debt Owed","Seller Score","Motivated Seller Flags","Source","Public Records URL"];
+  var rows=[cols];
+  filtered.forEach(function(r){
+    var fn="",ln="",o=r.owner||"";
+    if(o.indexOf(",")>=0){var p=o.split(",");ln=p[0].trim();fn=(p[1]||"").trim();}
+    else{var p=o.split(" ");fn=p[0]||"";ln=p.slice(1).join(" ");}
+    var amt=r.amount?"$"+Number(r.amount).toLocaleString():"";
+    rows.push([fn,ln,r.mail_address||"",r.mail_city||"",r.mail_state||"OH",r.mail_zip||"",r.prop_address||"",r.prop_city||"",r.prop_state||"OH",r.prop_zip||"",r.cat_label||"",r.doc_type||"",r.filed||"",r.doc_num||"",amt,r.score||0,(r.flags||[]).join("; "),r.source||"Cuyahoga County",r.clerk_url||""]);
+  });
+  var csv=rows.map(function(row){return row.map(function(v){return '"'+String(v).replace(/"/g,'""')+'"';}).join(",");}).join("\r\n");
+  var a=document.createElement("a");a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv);a.download="cuyahoga_leads_"+new Date().toISOString().slice(0,10)+".csv";a.click();
+};
+
+document.getElementById("clearBtn").onclick=function(){if(confirm("Remove all manually uploaded records?")){MAN=[];saveMAN();toast("Cleared","ok");render();}};
+document.getElementById("q").addEventListener("input",function(e){qStr=e.target.value.trim();page=1;applyFilters();});
+document.getElementById("sortSel").addEventListener("change",function(e){sortK=e.target.value;page=1;applyFilters();});
+document.getElementById("sr").addEventListener("input",function(e){minSc=+e.target.value;document.getElementById("sv").textContent=minSc;page=1;applyFilters();});
+document.getElementById("resetBtn").onclick=function(){
+  cats.clear();minSc=0;addrOnly=false;newOnly=false;autoOnly=false;manOnly=false;qStr="";sortK="score_d";page=1;
+  document.getElementById("q").value="";document.getElementById("sr").value=0;document.getElementById("sv").textContent="0";document.getElementById("sortSel").value="score_d";
+  document.querySelectorAll("aside .chip").forEach(function(c){c.classList.remove("on");});
+  var fc=document.querySelector("#catfilters .chip");if(fc)fc.classList.add("on");
+  applyFilters();
+};
+document.getElementById("autoChip").onclick=function(){autoOnly=!autoOnly;manOnly=false;this.classList.toggle("on",autoOnly);document.getElementById("manChip").classList.remove("on");page=1;applyFilters();};
+document.getElementById("manChip").onclick=function(){manOnly=!manOnly;autoOnly=false;this.classList.toggle("on",manOnly);document.getElementById("autoChip").classList.remove("on");page=1;applyFilters();};
+document.getElementById("addrChip").onclick=function(){addrOnly=!addrOnly;this.classList.toggle("on",addrOnly);page=1;applyFilters();};
+document.getElementById("newChip").onclick=function(){newOnly=!newOnly;this.classList.toggle("on",newOnly);page=1;applyFilters();};
+
+function toast(msg,type){var t=document.getElementById("toast");t.textContent=msg;t.className="toast "+type+" show";setTimeout(function(){t.classList.remove("show");},3000);}
+
+init();
+</script>
+</body>
+</html>
