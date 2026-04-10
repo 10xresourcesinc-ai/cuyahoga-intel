@@ -1,12 +1,12 @@
 {
-  "fetched_at": "2026-04-10T21:06:41.052964+00:00",
+  "fetched_at": "2026-04-10T21:16:55.525011+00:00",
   "source": "Cuyahoga County Court Docket + Manual Uploads",
   "date_range": {
     "from": "04/03/2026",
     "to": "04/10/2026"
   },
-  "total": 37,
-  "with_address": 37,
+  "total": 32,
+  "with_address": 2,
   "records": [
     {
       "doc_num": "CV19924853",
@@ -19,7 +19,7 @@
       "amount": 19924853.0,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl02$lnkCaseNum','')",
-      "prop_address": "Case #: CV19924853",
+      "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -28,11 +28,10 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 60,
+      "score": 55,
       "flags": [
         "Pre-foreclosure",
-        "High debt (>$100k)",
-        "Address found"
+        "High debt (>$100k)"
       ]
     },
     {
@@ -46,7 +45,7 @@
       "amount": 21951714.0,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl03$lnkCaseNum','')",
-      "prop_address": "Case #: CV21951714",
+      "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -55,11 +54,10 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 60,
+      "score": 55,
       "flags": [
         "Pre-foreclosure",
-        "High debt (>$100k)",
-        "Address found"
+        "High debt (>$100k)"
       ]
     },
     {
@@ -73,7 +71,7 @@
       "amount": 15848659.0,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl04$lnkCaseNum','')",
-      "prop_address": "Case #: CV15848659",
+      "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -82,11 +80,10 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 60,
+      "score": 55,
       "flags": [
         "Pre-foreclosure",
-        "High debt (>$100k)",
-        "Address found"
+        "High debt (>$100k)"
       ]
     },
     {
@@ -100,7 +97,7 @@
       "amount": 11708061.0,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/#",
-      "prop_address": "117-08-061",
+      "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -109,11 +106,10 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 60,
+      "score": 55,
       "flags": [
         "Pre-foreclosure",
-        "High debt (>$100k)",
-        "Address found"
+        "High debt (>$100k)"
       ]
     },
     {
@@ -127,7 +123,7 @@
       "amount": 21947416.0,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl05$lnkCaseNum','')",
-      "prop_address": "Case #: CV21947416",
+      "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -136,11 +132,10 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 60,
+      "score": 55,
       "flags": [
         "Pre-foreclosure",
-        "High debt (>$100k)",
-        "Address found"
+        "High debt (>$100k)"
       ]
     },
     {
@@ -154,7 +149,7 @@
       "amount": 19913692.0,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl06$lnkCaseNum','')",
-      "prop_address": "Case #: CV19913692",
+      "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -163,11 +158,10 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 60,
+      "score": 55,
       "flags": [
         "Pre-foreclosure",
-        "High debt (>$100k)",
-        "Address found"
+        "High debt (>$100k)"
       ]
     },
     {
@@ -181,7 +175,7 @@
       "amount": 14834135.0,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl07$lnkCaseNum','')",
-      "prop_address": "Case #: CV14834135",
+      "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -190,11 +184,10 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 60,
+      "score": 55,
       "flags": [
         "Pre-foreclosure",
-        "High debt (>$100k)",
-        "Address found"
+        "High debt (>$100k)"
       ]
     },
     {
@@ -208,7 +201,7 @@
       "amount": 17886864.0,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl08$lnkCaseNum','')",
-      "prop_address": "Case #: CV17886864",
+      "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -217,11 +210,10 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 60,
+      "score": 55,
       "flags": [
         "Pre-foreclosure",
-        "High debt (>$100k)",
-        "Address found"
+        "High debt (>$100k)"
       ]
     },
     {
@@ -235,7 +227,7 @@
       "amount": 19920641.0,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl09$lnkCaseNum','')",
-      "prop_address": "Case #: CV19920641",
+      "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -244,11 +236,10 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 60,
+      "score": 55,
       "flags": [
         "Pre-foreclosure",
-        "High debt (>$100k)",
-        "Address found"
+        "High debt (>$100k)"
       ]
     },
     {
@@ -262,7 +253,7 @@
       "amount": 19920256.0,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl10$lnkCaseNum','')",
-      "prop_address": "Case #: CV19920256",
+      "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -271,11 +262,10 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 60,
+      "score": 55,
       "flags": [
         "Pre-foreclosure",
-        "High debt (>$100k)",
-        "Address found"
+        "High debt (>$100k)"
       ]
     },
     {
@@ -289,7 +279,7 @@
       "amount": 21951106.0,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl11$lnkCaseNum','')",
-      "prop_address": "Case #: CV21951106",
+      "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -298,11 +288,10 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 60,
+      "score": 55,
       "flags": [
         "Pre-foreclosure",
-        "High debt (>$100k)",
-        "Address found"
+        "High debt (>$100k)"
       ]
     },
     {
@@ -316,7 +305,7 @@
       "amount": 26317013.0,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/#",
-      "prop_address": "263-17-013",
+      "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -325,11 +314,10 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 60,
+      "score": 55,
       "flags": [
         "Pre-foreclosure",
-        "High debt (>$100k)",
-        "Address found"
+        "High debt (>$100k)"
       ]
     },
     {
@@ -343,7 +331,7 @@
       "amount": 24100048.0,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl12$lnkCaseNum','')",
-      "prop_address": "Case #: CV24100048",
+      "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -352,11 +340,10 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 60,
+      "score": 55,
       "flags": [
         "Pre-foreclosure",
-        "High debt (>$100k)",
-        "Address found"
+        "High debt (>$100k)"
       ]
     },
     {
@@ -370,7 +357,7 @@
       "amount": 14309042.0,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/#",
-      "prop_address": "143-09-042",
+      "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -379,11 +366,10 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 60,
+      "score": 55,
       "flags": [
         "Pre-foreclosure",
-        "High debt (>$100k)",
-        "Address found"
+        "High debt (>$100k)"
       ]
     },
     {
@@ -397,7 +383,7 @@
       "amount": 22959396.0,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl13$lnkCaseNum','')",
-      "prop_address": "Case #: CV22959396",
+      "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -406,11 +392,10 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 60,
+      "score": 55,
       "flags": [
         "Pre-foreclosure",
-        "High debt (>$100k)",
-        "Address found"
+        "High debt (>$100k)"
       ]
     },
     {
@@ -424,7 +409,7 @@
       "amount": 2219127.0,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/#",
-      "prop_address": "022-19-127",
+      "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -433,11 +418,10 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 60,
+      "score": 55,
       "flags": [
         "Pre-foreclosure",
-        "High debt (>$100k)",
-        "Address found"
+        "High debt (>$100k)"
       ]
     },
     {
@@ -451,7 +435,7 @@
       "amount": 10723458.0,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl14$lnkCaseNum','')",
-      "prop_address": "Case #: CV10723458",
+      "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -460,11 +444,10 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 60,
+      "score": 55,
       "flags": [
         "Pre-foreclosure",
-        "High debt (>$100k)",
-        "Address found"
+        "High debt (>$100k)"
       ]
     },
     {
@@ -478,7 +461,7 @@
       "amount": 13521025.0,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/#",
-      "prop_address": "135-21-025",
+      "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -487,11 +470,10 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 60,
+      "score": 55,
       "flags": [
         "Pre-foreclosure",
-        "High debt (>$100k)",
-        "Address found"
+        "High debt (>$100k)"
       ]
     },
     {
@@ -505,7 +487,7 @@
       "amount": 15843846.0,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl15$lnkCaseNum','')",
-      "prop_address": "Case #: CV15843846",
+      "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -514,11 +496,10 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 60,
+      "score": 55,
       "flags": [
         "Pre-foreclosure",
-        "High debt (>$100k)",
-        "Address found"
+        "High debt (>$100k)"
       ]
     },
     {
@@ -532,7 +513,7 @@
       "amount": 24103128.0,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl16$lnkCaseNum','')",
-      "prop_address": "Case #: CV24103128",
+      "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -541,11 +522,10 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 60,
+      "score": 55,
       "flags": [
         "Pre-foreclosure",
-        "High debt (>$100k)",
-        "Address found"
+        "High debt (>$100k)"
       ]
     },
     {
@@ -559,7 +539,7 @@
       "amount": 1817132.0,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/#",
-      "prop_address": "018-17-132",
+      "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -568,11 +548,10 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 60,
+      "score": 55,
       "flags": [
         "Pre-foreclosure",
-        "High debt (>$100k)",
-        "Address found"
+        "High debt (>$100k)"
       ]
     },
     {
@@ -602,7 +581,7 @@
       ]
     },
     {
-      "doc_num": "703-01-013",
+      "doc_num": "Parcel # Address Des",
       "doc_type": "NOFC",
       "cat": "NOFC",
       "cat_label": "Notice of Foreclosure",
@@ -612,7 +591,7 @@
       "amount": null,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/#",
-      "prop_address": "703-01-013",
+      "prop_address": "Parcel # Address Description 117-08-061 1713  CLIFFVIEW ROAD",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -625,6 +604,31 @@
       "flags": [
         "Pre-foreclosure",
         "Address found"
+      ]
+    },
+    {
+      "doc_num": "703-01-013",
+      "doc_type": "NOFC",
+      "cat": "NOFC",
+      "cat_label": "Notice of Foreclosure",
+      "filed": "",
+      "owner": "",
+      "grantee": "",
+      "amount": null,
+      "legal": "",
+      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/#",
+      "prop_address": "",
+      "prop_city": "Cleveland",
+      "prop_state": "OH",
+      "prop_zip": "",
+      "mail_address": "",
+      "mail_city": "",
+      "mail_state": "OH",
+      "mail_zip": "",
+      "source": "Court Docket",
+      "score": 40,
+      "flags": [
+        "Pre-foreclosure"
       ]
     },
     {
@@ -638,7 +642,7 @@
       "amount": null,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/#",
-      "prop_address": "812-35-355",
+      "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -647,36 +651,9 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 45,
+      "score": 40,
       "flags": [
-        "Pre-foreclosure",
-        "Address found"
-      ]
-    },
-    {
-      "doc_num": "Parcel # Address Description 117-08-061 1713  CLIFFVIEW ROAD",
-      "doc_type": "NOFC",
-      "cat": "NOFC",
-      "cat_label": "Notice of Foreclosure",
-      "filed": "",
-      "owner": "",
-      "grantee": "",
-      "amount": null,
-      "legal": "",
-      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/#",
-      "prop_address": "1713  CLIFFVIEW ROAD",
-      "prop_city": "Cleveland",
-      "prop_state": "OH",
-      "prop_zip": "",
-      "mail_address": "",
-      "mail_city": "",
-      "mail_state": "OH",
-      "mail_zip": "",
-      "source": "Court Docket",
-      "score": 45,
-      "flags": [
-        "Pre-foreclosure",
-        "Address found"
+        "Pre-foreclosure"
       ]
     },
     {
@@ -690,7 +667,7 @@
       "amount": null,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/#",
-      "prop_address": "863-01-818D",
+      "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -699,10 +676,9 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 45,
+      "score": 40,
       "flags": [
-        "Pre-foreclosure",
-        "Address found"
+        "Pre-foreclosure"
       ]
     },
     {
@@ -716,7 +692,7 @@
       "amount": null,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/#",
-      "prop_address": "734-39-024",
+      "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -725,10 +701,9 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 45,
+      "score": 40,
       "flags": [
-        "Pre-foreclosure",
-        "Address found"
+        "Pre-foreclosure"
       ]
     },
     {
@@ -742,7 +717,7 @@
       "amount": null,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/#",
-      "prop_address": "736-11-314",
+      "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -751,36 +726,9 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 45,
+      "score": 40,
       "flags": [
-        "Pre-foreclosure",
-        "Address found"
-      ]
-    },
-    {
-      "doc_num": "Parcel # Address Description 762-02-071 4452  LEE HEIGHTS BLVD",
-      "doc_type": "NOFC",
-      "cat": "NOFC",
-      "cat_label": "Notice of Foreclosure",
-      "filed": "",
-      "owner": "",
-      "grantee": "",
-      "amount": null,
-      "legal": "",
-      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/#",
-      "prop_address": "4452  LEE HEIGHTS BLVD",
-      "prop_city": "Cleveland",
-      "prop_state": "OH",
-      "prop_zip": "",
-      "mail_address": "",
-      "mail_city": "",
-      "mail_state": "OH",
-      "mail_zip": "",
-      "source": "Court Docket",
-      "score": 45,
-      "flags": [
-        "Pre-foreclosure",
-        "Address found"
+        "Pre-foreclosure"
       ]
     },
     {
@@ -794,7 +742,7 @@
       "amount": null,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/#",
-      "prop_address": "762-02-071",
+      "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -803,36 +751,9 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 45,
+      "score": 40,
       "flags": [
-        "Pre-foreclosure",
-        "Address found"
-      ]
-    },
-    {
-      "doc_num": "Parcel # Address Description 872-19-002 30550  SHAKER BOULEVARD",
-      "doc_type": "NOFC",
-      "cat": "NOFC",
-      "cat_label": "Notice of Foreclosure",
-      "filed": "",
-      "owner": "",
-      "grantee": "",
-      "amount": null,
-      "legal": "",
-      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/#",
-      "prop_address": "30550  SHAKER BOULEVARD",
-      "prop_city": "Cleveland",
-      "prop_state": "OH",
-      "prop_zip": "30550",
-      "mail_address": "",
-      "mail_city": "",
-      "mail_state": "OH",
-      "mail_zip": "",
-      "source": "Court Docket",
-      "score": 45,
-      "flags": [
-        "Pre-foreclosure",
-        "Address found"
+        "Pre-foreclosure"
       ]
     },
     {
@@ -846,7 +767,7 @@
       "amount": null,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/#",
-      "prop_address": "872-19-002",
+      "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -855,36 +776,9 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 45,
+      "score": 40,
       "flags": [
-        "Pre-foreclosure",
-        "Address found"
-      ]
-    },
-    {
-      "doc_num": "Parcel # Address Description 861-04-093 1118  SUMMIT DR",
-      "doc_type": "NOFC",
-      "cat": "NOFC",
-      "cat_label": "Notice of Foreclosure",
-      "filed": "",
-      "owner": "",
-      "grantee": "",
-      "amount": null,
-      "legal": "",
-      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/#",
-      "prop_address": "1118  SUMMIT DR",
-      "prop_city": "Cleveland",
-      "prop_state": "OH",
-      "prop_zip": "",
-      "mail_address": "",
-      "mail_city": "",
-      "mail_state": "OH",
-      "mail_zip": "",
-      "source": "Court Docket",
-      "score": 45,
-      "flags": [
-        "Pre-foreclosure",
-        "Address found"
+        "Pre-foreclosure"
       ]
     },
     {
@@ -898,7 +792,7 @@
       "amount": null,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/#",
-      "prop_address": "861-04-093",
+      "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -907,62 +801,9 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 45,
+      "score": 40,
       "flags": [
-        "Pre-foreclosure",
-        "Address found"
-      ]
-    },
-    {
-      "doc_num": "Parcel # Address Description 135-21-025 3782  E 116TH ST",
-      "doc_type": "NOFC",
-      "cat": "NOFC",
-      "cat_label": "Notice of Foreclosure",
-      "filed": "",
-      "owner": "",
-      "grantee": "",
-      "amount": null,
-      "legal": "",
-      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/#",
-      "prop_address": "3782  E 116TH ST",
-      "prop_city": "Cleveland",
-      "prop_state": "OH",
-      "prop_zip": "",
-      "mail_address": "",
-      "mail_city": "",
-      "mail_state": "OH",
-      "mail_zip": "",
-      "source": "Court Docket",
-      "score": 45,
-      "flags": [
-        "Pre-foreclosure",
-        "Address found"
-      ]
-    },
-    {
-      "doc_num": "Parcel # Address Description 541-12-012 4748  EAST 88TH STREET",
-      "doc_type": "NOFC",
-      "cat": "NOFC",
-      "cat_label": "Notice of Foreclosure",
-      "filed": "",
-      "owner": "",
-      "grantee": "",
-      "amount": null,
-      "legal": "",
-      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/#",
-      "prop_address": "4748  EAST 88TH ST",
-      "prop_city": "Cleveland",
-      "prop_state": "OH",
-      "prop_zip": "",
-      "mail_address": "",
-      "mail_city": "",
-      "mail_state": "OH",
-      "mail_zip": "",
-      "source": "Court Docket",
-      "score": 45,
-      "flags": [
-        "Pre-foreclosure",
-        "Address found"
+        "Pre-foreclosure"
       ]
     },
     {
@@ -976,7 +817,7 @@
       "amount": null,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/#",
-      "prop_address": "541-12-012",
+      "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -985,10 +826,9 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 45,
+      "score": 40,
       "flags": [
-        "Pre-foreclosure",
-        "Address found"
+        "Pre-foreclosure"
       ]
     }
   ]
