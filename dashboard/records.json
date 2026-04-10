@@ -1,5 +1,9 @@
 {
+<<<<<<< HEAD
   "fetched_at": "2026-04-10T20:33:17.938761+00:00",
+=======
+  "fetched_at": "2026-04-10T20:59:03.557318+00:00",
+>>>>>>> 8aa40b028e813cb043a40285467b452ecdc3c5ef
   "source": "Cuyahoga County Court Docket + Manual Uploads",
   "date_range": {
     "from": "04/03/2026",
@@ -738,6 +742,7 @@
       ]
     },
     {
+<<<<<<< HEAD
       "doc_num": "Case #:CV22959396",
       "doc_type": "NOFC",
       "cat": "NOFC",
@@ -819,6 +824,8 @@
       ]
     },
     {
+=======
+>>>>>>> 8aa40b028e813cb043a40285467b452ecdc3c5ef
       "doc_num": "Case #:CV21951106",
       "doc_type": "NOFC",
       "cat": "NOFC",
@@ -828,7 +835,11 @@
       "grantee": "",
       "amount": 21951106.0,
       "legal": "",
+<<<<<<< HEAD
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl12$lnkCaseNum','')",
+=======
+      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl11$lnkCaseNum','')",
+>>>>>>> 8aa40b028e813cb043a40285467b452ecdc3c5ef
       "prop_address": "Case #:CV21951106",
       "prop_city": "Cleveland",
       "prop_state": "OH",
@@ -900,6 +911,90 @@
       ]
     },
     {
+<<<<<<< HEAD
+=======
+      "doc_num": "Case #:CV22959396",
+      "doc_type": "NOFC",
+      "cat": "NOFC",
+      "cat_label": "Notice of Foreclosure",
+      "filed": "Case #:CV2",
+      "owner": "",
+      "grantee": "",
+      "amount": 22959396.0,
+      "legal": "",
+      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl12$lnkCaseNum','')",
+      "prop_address": "Case #:CV22959396",
+      "prop_city": "Cleveland",
+      "prop_state": "OH",
+      "prop_zip": "",
+      "mail_address": "",
+      "mail_city": "",
+      "mail_state": "OH",
+      "mail_zip": "",
+      "source": "Court Docket",
+      "score": 60,
+      "flags": [
+        "Pre-foreclosure",
+        "High debt (>$100k)",
+        "Address found"
+      ]
+    },
+    {
+      "doc_num": "IF NOT SOLD ON 12/08/2025 IT WILL BE RE-OFFERED ON 12/22/2025Parcel #AddressDescription022-19-12713726  LEROY AVENUEA SINGLE FRAME DWELLING WITH GARAGE",
+      "doc_type": "NOFC",
+      "cat": "NOFC",
+      "cat_label": "Notice of Foreclosure",
+      "filed": "IF NOT SOL",
+      "owner": "",
+      "grantee": "",
+      "amount": 1.208202512222025e+28,
+      "legal": "",
+      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/#",
+      "prop_address": "IF NOT SOLD ON 12/08/2025 IT WILL BE RE-OFFERED ON 12/22/2025Parcel #AddressDescription022-19-12713726  LEROY AVENUEA SINGLE FRAME DWELLING WITH GARAGE",
+      "prop_city": "Cleveland",
+      "prop_state": "OH",
+      "prop_zip": "",
+      "mail_address": "",
+      "mail_city": "",
+      "mail_state": "OH",
+      "mail_zip": "",
+      "source": "Court Docket",
+      "score": 60,
+      "flags": [
+        "Pre-foreclosure",
+        "High debt (>$100k)",
+        "Address found"
+      ]
+    },
+    {
+      "doc_num": "022-19-127",
+      "doc_type": "NOFC",
+      "cat": "NOFC",
+      "cat_label": "Notice of Foreclosure",
+      "filed": "022-19-127",
+      "owner": "",
+      "grantee": "",
+      "amount": 2219127.0,
+      "legal": "",
+      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/#",
+      "prop_address": "022-19-127",
+      "prop_city": "Cleveland",
+      "prop_state": "OH",
+      "prop_zip": "",
+      "mail_address": "",
+      "mail_city": "",
+      "mail_state": "OH",
+      "mail_zip": "",
+      "source": "Court Docket",
+      "score": 60,
+      "flags": [
+        "Pre-foreclosure",
+        "High debt (>$100k)",
+        "Address found"
+      ]
+    },
+    {
+>>>>>>> 8aa40b028e813cb043a40285467b452ecdc3c5ef
       "doc_num": "Case #:CV24100048",
       "doc_type": "NOFC",
       "cat": "NOFC",
@@ -1458,17 +1553,29 @@
       ]
     },
     {
+<<<<<<< HEAD
       "doc_num": "Attorney:JAMES SASSANOAppraised$100,000.00Case #:CV22959396Minimum Bid$66,667.00ResidentialWILMINGTON SAVINGS FUND SOCIETY, FSB, AS TRUSTEE OFVSSale Date12/8/2025GALARZA/NARCISO/A.StatusSOLDIF NOT SOLD ON 12/08/2025 IT WILL BE RE-OFFERED ON 12/22/2025Parcel #AddressDescription022-19-12713726  LEROY AVENUEA SINGLE FRAME DWELLING WITH GARAGE",
       "doc_type": "NOFC",
       "cat": "NOFC",
       "cat_label": "Notice of Foreclosure",
       "filed": "Attorney:J",
+=======
+      "doc_num": "Attorney:TED HUMBERTAppraised$375,000.00Case #:CV21951106Minimum Bid$250,000.00ResidentialU.S. BANK NATIONAL ASSOCIATION, AS TRUSTEE FOR PRIME MORTGAGE TRUST,VSSale Date11/17/2025PATAY/KARL/JENOStatusSOLDIF NOT SOLD ON 11/17/2025 IT WILL BE RE-OFFERED ON 12/01/2025Parcel #AddressDescription263-17-0138998  USHER ROADA SINGLE FRAME DWELLING WITH TWO CAR GARAGE",
+      "doc_type": "NOFC",
+      "cat": "NOFC",
+      "cat_label": "Notice of Foreclosure",
+      "filed": "Attorney:T",
+>>>>>>> 8aa40b028e813cb043a40285467b452ecdc3c5ef
       "owner": "",
       "grantee": "",
       "amount": null,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl11$lnkCaseNum','')",
+<<<<<<< HEAD
       "prop_address": "Attorney:JAMES SASSANOAppraised$100,000.00Case #:CV22959396Minimum Bid$66,667.00ResidentialWILMINGTON SAVINGS FUND SOCIETY, FSB, AS TRUSTEE OFVSSale Date12/8/2025GALARZA/NARCISO/A.StatusSOLDIF NOT SOLD ON 12/08/2025 IT WILL BE RE-OFFERED ON 12/22/2025Parcel #AddressDescription022-19-12713726  LEROY AVENUEA SINGLE FRAME DWELLING WITH GARAGE",
+=======
+      "prop_address": "Attorney:TED HUMBERTAppraised$375,000.00Case #:CV21951106Minimum Bid$250,000.00ResidentialU.S. BANK NATIONAL ASSOCIATION, AS TRUSTEE FOR PRIME MORTGAGE TRUST,VSSale Date11/17/2025PATAY/KARL/JENOStatusSOLDIF NOT SOLD ON 11/17/2025 IT WILL BE RE-OFFERED ON 12/01/2025Parcel #AddressDescription263-17-0138998  USHER ROADA SINGLE FRAME DWELLING WITH TWO CAR GARAGE",
+>>>>>>> 8aa40b028e813cb043a40285467b452ecdc3c5ef
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -1484,17 +1591,29 @@
       ]
     },
     {
+<<<<<<< HEAD
       "doc_num": "Attorney:TED HUMBERTAppraised$375,000.00Case #:CV21951106Minimum Bid$250,000.00ResidentialU.S. BANK NATIONAL ASSOCIATION, AS TRUSTEE FOR PRIME MORTGAGE TRUST,VSSale Date11/17/2025PATAY/KARL/JENOStatusSOLDIF NOT SOLD ON 11/17/2025 IT WILL BE RE-OFFERED ON 12/01/2025Parcel #AddressDescription263-17-0138998  USHER ROADA SINGLE FRAME DWELLING WITH TWO CAR GARAGE",
       "doc_type": "NOFC",
       "cat": "NOFC",
       "cat_label": "Notice of Foreclosure",
       "filed": "Attorney:T",
+=======
+      "doc_num": "Attorney:JAMES SASSANOAppraised$100,000.00Case #:CV22959396Minimum Bid$66,667.00ResidentialWILMINGTON SAVINGS FUND SOCIETY, FSB, AS TRUSTEE OFVSSale Date12/8/2025GALARZA/NARCISO/A.StatusSOLDIF NOT SOLD ON 12/08/2025 IT WILL BE RE-OFFERED ON 12/22/2025Parcel #AddressDescription022-19-12713726  LEROY AVENUEA SINGLE FRAME DWELLING WITH GARAGE",
+      "doc_type": "NOFC",
+      "cat": "NOFC",
+      "cat_label": "Notice of Foreclosure",
+      "filed": "Attorney:J",
+>>>>>>> 8aa40b028e813cb043a40285467b452ecdc3c5ef
       "owner": "",
       "grantee": "",
       "amount": null,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl12$lnkCaseNum','')",
+<<<<<<< HEAD
       "prop_address": "Attorney:TED HUMBERTAppraised$375,000.00Case #:CV21951106Minimum Bid$250,000.00ResidentialU.S. BANK NATIONAL ASSOCIATION, AS TRUSTEE FOR PRIME MORTGAGE TRUST,VSSale Date11/17/2025PATAY/KARL/JENOStatusSOLDIF NOT SOLD ON 11/17/2025 IT WILL BE RE-OFFERED ON 12/01/2025Parcel #AddressDescription263-17-0138998  USHER ROADA SINGLE FRAME DWELLING WITH TWO CAR GARAGE",
+=======
+      "prop_address": "Attorney:JAMES SASSANOAppraised$100,000.00Case #:CV22959396Minimum Bid$66,667.00ResidentialWILMINGTON SAVINGS FUND SOCIETY, FSB, AS TRUSTEE OFVSSale Date12/8/2025GALARZA/NARCISO/A.StatusSOLDIF NOT SOLD ON 12/08/2025 IT WILL BE RE-OFFERED ON 12/22/2025Parcel #AddressDescription022-19-12713726  LEROY AVENUEA SINGLE FRAME DWELLING WITH GARAGE",
+>>>>>>> 8aa40b028e813cb043a40285467b452ecdc3c5ef
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
