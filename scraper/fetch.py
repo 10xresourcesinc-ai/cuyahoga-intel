@@ -206,8 +206,145 @@ class CourtDocketScraper:
     # ------------------------------------------------------------------
     def _parse_sheriff_html(self, html: str) -> list[dict]:
         """
-        Parse the Cuyahoga County Sheriff Sale results page.
+        Parse Cuyahoga County Sheriff Sale results.
+        The table uses merged cells — all data for each property
+        is in a single text blob per row. We extract with regex.
         """
+        records = []
+        soup = BeautifulSoup(html, "lxml")
+
+        # Get all text blocks from table cells
+        blocks = []
+        for table in soup.find_all("table"):
+            for row in table.find_all("tr"):
+                cells = row.find_all(["td","th"])
+                if not cells:
+                    continue
+                # Get full text of the row
+                row_text = " ".join(c.get_text(" ", strip=True) for c in cells)
+                if len(row_text) < 20:
+                    continue
+                # Check if this looks like a property record
+                if re.search(r'cv\s*\d{4,}', row_text, re.I):
+                    blocks.append((row_text, row))
+
+        log.info("Sheriff: found %d property blocks", len(blocks))
+
+        for block_text, row in blocks:
+            try:
+                rec = self._extract_from_block(block_text, row)
+                if rec:
+                    records.append(rec)
+            except Exception as e:
+                log.debug("Block parse error: %s", e)
+
+        return records
+
+    # ------------------------------------------------------------------
+    def _extract_from_block(self, text: str, row) -> Optional[dict]:
+        """Extract all fields from a sheriff sale text block."""
+
+        # Case number
+        case_m = re.search(r'case\s*#?\s*:?\s*(cv\s*\d{4,})', text, re.I)
+        if not case_m:
+            case_m = re.search(r'\b(cv\s*\d{4,})\b', text, re.I)
+        if not case_m:
+            return None
+        case_num = case_m.group(1).replace(" ", "").upper()
+
+        # Sale date
+        date_m = re.search(r'sale\s*date\s*:?\s*(\d{1,2}/\d{1,2}/\d{4})', text, re.I)
+        if not date_m:
+            date_m = re.search(r'\b(\d{1,2}/\d{1,2}/\d{4})\b', text)
+        sale_date = date_m.group(1) if date_m else ""
+
+        # Filter by date range
+        if sale_date:
+            try:
+                dt = datetime.strptime(sale_date, "%m/%d/%Y")
+                if dt < self.date_from:
+                    return None
+            except Exception:
+                pass
+
+        # Plaintiff / Attorney / Lender
+        plaintiff_m = re.search(
+            r'(?:attorney|plaintiff|lender|mortgagee)\s*:?\s*([A-Z][A-Za-z\s,\.&]{3,60}?)(?:\s*(?:appraised|vs|case|sale|\$|parcel))',
+            text, re.I
+        )
+        plaintiff = plaintiff_m.group(1).strip().title() if plaintiff_m else ""
+
+        # Defendant / Owner — appears after "vs" or "mitchell/ruth" style
+        # Pattern: look for names after "vs" keyword
+        defendant_m = re.search(
+            r'\bvs\.?\s+([A-Z][A-Za-z\s,\./-]{3,60}?)(?:\s*(?:status|sale|parcel|address|description|\d{3}-\d{2}))',
+            text, re.I
+        )
+        if not defendant_m:
+            # Try slash-separated names like "mitchell/ruth/"
+            defendant_m = re.search(
+                r'(?:vs\.?\s+|defendant\s*:?\s*)([A-Za-z]+(?:/[A-Za-z]+)+)',
+                text, re.I
+            )
+        owner = ""
+        if defendant_m:
+            raw = defendant_m.group(1).strip()
+            # Clean up slash names: "mitchell/ruth" -> "Mitchell Ruth"
+            owner = " ".join(p.title() for p in re.split(r'[/,]', raw) if p.strip())
+
+        # Property address
+        addr_m = re.search(
+            r'\b(\d{3,5}\s+[A-Za-z][A-Za-z0-9\s]{2,40?}'
+            r'(?:street|st|avenue|ave|drive|dr|road|rd|boulevard|blvd|'
+            r'lane|ln|court|ct|place|pl|way|circle|cir|parkway|pkwy))\b',
+            text, re.I
+        )
+        prop_address = addr_m.group(1).strip().title() if addr_m else ""
+
+        # Zip code
+        zip_m = re.search(r'\b(44\d{3})\b', text)  # Cleveland area zips start with 44
+        prop_zip = zip_m.group(1) if zip_m else ""
+
+        # Parcel number
+        parcel_m = re.search(r'\b(\d{3}-\d{2}-\d{3})\b', text)
+        parcel = parcel_m.group(1) if parcel_m else ""
+
+        # Appraised value
+        amount_m = re.search(r'appraised\s*\$?([\d,]+(?:\.\d{2})?)', text, re.I)
+        if not amount_m:
+            amount_m = re.search(r'minimum\s+bid\s*\$?([\d,]+)', text, re.I)
+        amount = parse_amount(amount_m.group(1)) if amount_m else None
+
+        # Build link
+        link_tag = row.find("a", href=True)
+        href = link_tag["href"] if link_tag else ""
+        if href and not href.startswith("http"):
+            href = f"{COURT_URL}/{href.lstrip('/')}"
+        # Build link from case number if no direct link
+        if not href and case_num:
+            href = f"{COURT_URL}/Search.aspx?q=searchType%3DCase+Number%26searchString%3D{case_num}"
+
+        return {
+            "doc_num":      case_num,
+            "doc_type":     "NOFC",
+            "cat":          "NOFC",
+            "cat_label":    "Notice of Foreclosure",
+            "filed":        sale_date,
+            "owner":        owner,
+            "grantee":      plaintiff,
+            "amount":       amount,
+            "legal":        parcel,
+            "clerk_url":    href,
+            "prop_address": prop_address,
+            "prop_city":    "Cleveland",
+            "prop_state":   "OH",
+            "prop_zip":     prop_zip,
+            "mail_address": "",
+            "mail_city":    "",
+            "mail_state":   "OH",
+            "mail_zip":     "",
+            "source":       "Court Docket",
+        }
         records = []
         soup = BeautifulSoup(html, "lxml")
 
