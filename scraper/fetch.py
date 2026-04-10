@@ -207,10 +207,162 @@ class CourtDocketScraper:
     def _parse_sheriff_html(self, html: str) -> list[dict]:
         """
         Parse the Cuyahoga County Sheriff Sale results page.
-        The table columns are typically:
-        Case Number | Sale Date | Plaintiff | Defendant/Owner |
-        Property Address | Parcel | Appraised Value | Status
         """
+        records = []
+        soup = BeautifulSoup(html, "lxml")
+
+        for table in soup.find_all("table"):
+            rows = table.find_all("tr")
+            if len(rows) < 2:
+                continue
+
+            header_row = rows[0]
+            headers = [th.get_text(strip=True).lower()
+                       for th in header_row.find_all(["th","td"])]
+            header_str = " ".join(headers)
+
+            if not any(k in header_str for k in
+                       ["case","sale","parcel","address","plaintiff","defendant"]):
+                continue
+
+            # Log actual headers and first data row for debugging
+            log.info("Sheriff table headers: %s", headers)
+            if len(rows) > 1:
+                first = [c.get_text(" ", strip=True)
+                         for c in rows[1].find_all(["td","th"])]
+                log.info("Sheriff first row: %s", first)
+
+            # Map column indices from actual headers
+            col = {}
+            for i, h in enumerate(headers):
+                h = h.strip()
+                if any(k in h for k in ["case #","case no","cv #","case number","caseno"]):
+                    col.setdefault("case_num", i)
+                elif h in ["case", "no", "#"] or "case" in h:
+                    col.setdefault("case_num", i)
+                if any(k in h for k in ["sale date","date of sale","sale dt","scheduled date","saledate"]):
+                    col.setdefault("date", i)
+                elif "date" in h and "case" not in h:
+                    col.setdefault("date", i)
+                if "plaintiff" in h:
+                    col.setdefault("plaintiff", i)
+                if "defendant" in h or "owner" in h:
+                    col.setdefault("defendant", i)
+                if "address" in h or "property addr" in h:
+                    col.setdefault("address", i)
+                if "parcel" in h and "address" not in h:
+                    col.setdefault("parcel", i)
+                if any(k in h for k in ["appraised","appraisal","value","amount","judgment"]):
+                    col.setdefault("amount", i)
+
+            log.info("Sheriff column map: %s", col)
+
+            for row in rows[1:]:
+                cells = [c.get_text(" ", strip=True) for c in row.find_all(["td","th"])]
+                if len(cells) < 3:
+                    continue
+
+                def get(key, default=""):
+                    idx = col.get(key)
+                    if idx is not None and idx < len(cells):
+                        return cells[idx].strip()
+                    return default
+
+                # Use positional if no column map
+                n = len(cells)
+                if not col:
+                    # Typical Cuyahoga order: CaseNum SaleDate Plaintiff Defendant Address Parcel AppValue Status
+                    case_num  = cells[0] if n > 0 else ""
+                    sale_date = cells[1] if n > 1 else ""
+                    plaintiff = cells[2] if n > 2 else ""
+                    defendant = cells[3] if n > 3 else ""
+                    address   = cells[4] if n > 4 else ""
+                    parcel    = cells[5] if n > 5 else ""
+                    amount    = cells[6] if n > 6 else ""
+                else:
+                    case_num  = get("case_num")
+                    sale_date = get("date")
+                    plaintiff = get("plaintiff")
+                    defendant = get("defendant")
+                    address   = get("address")
+                    parcel    = get("parcel")
+                    amount    = get("amount")
+
+                # Clean case number
+                case_match = re.search(r'(CV\s*\d{4,}|\d{2,4}\s*CV\s*\d+)', case_num, re.I)
+                clean_case = case_match.group(1).replace(" ","") if case_match else case_num[:20]
+                if not clean_case:
+                    continue
+
+                # Clean date
+                date_match = re.search(r'\d{1,2}/\d{1,2}/\d{4}', sale_date)
+                clean_date = date_match.group(0) if date_match else ""
+
+                # Clean address
+                addr_match = re.search(
+                    r'\d+\s+[A-Za-z][A-Za-z0-9\s]{3,40?}'
+                    r'(?:ST|AVE|DR|RD|BLVD|LN|CT|PL|WAY|CIR|PKWY|STREET|AVENUE|DRIVE|ROAD|LANE|COURT)\b',
+                    address, re.I
+                )
+                clean_addr = addr_match.group(0).strip() if addr_match else ""
+                if not clean_addr and address and not re.match(r'^(CV|Case|IF NOT|\d{3}-\d{2})', address, re.I):
+                    clean_addr = address[:80]
+
+                zip_match = re.search(r'\b(\d{5})\b', address)
+                clean_zip = zip_match.group(1) if zip_match else ""
+
+                # Clean amount
+                raw_amount = parse_amount(amount)
+                if raw_amount and raw_amount > 50_000_000:
+                    raw_amount = None
+
+                # Clean owner — reject values that look like non-names
+                clean_owner = defendant.strip()
+                if re.match(r'^(CV|IF NOT|PARCEL|CASE #|\d{3}-\d{2})', clean_owner, re.I):
+                    clean_owner = ""
+
+                clean_plaintiff = plaintiff.strip()
+                if re.match(r'^(CV|IF NOT|PARCEL|CASE #|\d{3}-\d{2})', clean_plaintiff, re.I):
+                    clean_plaintiff = ""
+
+                # Build URL
+                link_tag = row.find("a", href=True)
+                href = link_tag["href"] if link_tag else ""
+                if href and not href.startswith("http"):
+                    href = f"{COURT_URL}/{href.lstrip('/')}"
+
+                # Date filter
+                if clean_date:
+                    try:
+                        dt = datetime.strptime(clean_date, "%m/%d/%Y")
+                        if dt < self.date_from:
+                            continue
+                    except Exception:
+                        pass
+
+                records.append({
+                    "doc_num":      clean_case,
+                    "doc_type":     "NOFC",
+                    "cat":          "NOFC",
+                    "cat_label":    "Notice of Foreclosure",
+                    "filed":        clean_date,
+                    "owner":        clean_owner,
+                    "grantee":      clean_plaintiff,
+                    "amount":       raw_amount,
+                    "legal":        parcel,
+                    "clerk_url":    href,
+                    "prop_address": clean_addr,
+                    "prop_city":    "Cleveland",
+                    "prop_state":   "OH",
+                    "prop_zip":     clean_zip,
+                    "mail_address": "",
+                    "mail_city":    "",
+                    "mail_state":   "OH",
+                    "mail_zip":     "",
+                    "source":       "Court Docket",
+                })
+
+        return records
         records = []
         soup = BeautifulSoup(html, "lxml")
 
