@@ -1,5 +1,9 @@
 {
+<<<<<<< HEAD
   "fetched_at": "2026-04-11T17:04:10.835964+00:00",
+=======
+  "fetched_at": "2026-04-11T23:15:57.567673+00:00",
+>>>>>>> 779a126bfbea2a2e22676c9552d165ec3d6ecbc4
   "source": "Cuyahoga County Court Docket + Manual Uploads",
   "date_range": {
     "from": "04/04/2026",
@@ -44,7 +48,11 @@
       "grantee": "",
       "amount": 189082.0,
       "legal": "",
+<<<<<<< HEAD
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl09$lnkCaseNum','')",
+=======
+      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl08$lnkCaseNum','')",
+>>>>>>> 779a126bfbea2a2e22676c9552d165ec3d6ecbc4
       "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
@@ -321,7 +329,7 @@
       "grantee": "",
       "amount": 12505.0,
       "legal": "",
-      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl08$lnkCaseNum','')",
+      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl09$lnkCaseNum','')",
       "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
@@ -346,7 +354,11 @@
       "grantee": "",
       "amount": 0.0,
       "legal": "",
+<<<<<<< HEAD
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl12$lnkCaseNum','')",
+=======
+      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl11$lnkCaseNum','')",
+>>>>>>> 779a126bfbea2a2e22676c9552d165ec3d6ecbc4
       "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
