@@ -229,6 +229,8 @@ class CourtDocketScraper:
                     blocks.append((row_text, row))
 
         log.info("Sheriff: found %d property blocks", len(blocks))
+        if blocks:
+            log.info("SAMPLE BLOCK: %s", blocks[0][0][:600])
 
         for block_text, row in blocks:
             try:
