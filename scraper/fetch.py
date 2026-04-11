@@ -1,11 +1,11 @@
 """
-Cuyahoga County Motivated Seller Lead Scraper — Option B
-=========================================================
-Scrapes the Cuyahoga County Common Pleas Court docket for foreclosure filings.
-URL: https://cpdocket.cp.cuyahogacounty.us
-
-This runs automatically every day via GitHub Actions.
-Manual portal PDFs are handled by the dashboard's PDF upload feature.
+Cuyahoga County Motivated Seller Lead Scraper
+Scrapes Cuyahoga Common Pleas Court Sheriff Sale docket.
+Real data format (from logs):
+  Attorney: ELLEN FORNASH Appraised $120,000.00 Case #: CV19924853
+  Minimum Bid $80,000.00 Residential PRIMELENDING, A PLAINSCAPITAL COMPANY
+  VS Sale Date 1/12/2026 MITCHELL/RUTH/ Status CANCELLED BY ATTORNEY
+  Parcel # Address Description 703-01-013 1395 SOUTH BELVOIR BOULEVARD
 """
 
 import asyncio
@@ -21,23 +21,18 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
-import urllib3
 import requests
 from bs4 import BeautifulSoup
-
-# Suppress SSL warnings for government sites with cert issues
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 try:
     from playwright.async_api import async_playwright, TimeoutError as PWTimeout
     PLAYWRIGHT_AVAILABLE = True
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
-    logging.warning("Playwright not available")
 
-# ---------------------------------------------------------------------------
-# Logging
-# ---------------------------------------------------------------------------
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(message)s",
@@ -46,29 +41,20 @@ logging.basicConfig(
 )
 log = logging.getLogger("cuyahoga_scraper")
 
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
 COURT_URL        = "https://cpdocket.cp.cuyahogacounty.gov"
-SHERIFF_SALE_URL = "https://cpdocket.cp.cuyahogacounty.gov/SheriffSearch/search.aspx"
-LOOKBACK_DAYS = int(os.getenv("LOOKBACK_DAYS", "7"))
-REPO_ROOT     = Path(__file__).resolve().parent.parent
-DASHBOARD_JSON = REPO_ROOT / "dashboard" / "records.json"
-DATA_JSON      = REPO_ROOT / "data" / "records.json"
-GHL_CSV        = REPO_ROOT / "data" / "ghl_export.csv"
-RETRY_ATTEMPTS = 3
+SHERIFF_SALE_URL = f"{COURT_URL}/SheriffSearch/search.aspx"
+LOOKBACK_DAYS    = int(os.getenv("LOOKBACK_DAYS", "7"))
+REPO_ROOT        = Path(__file__).resolve().parent.parent
+DASHBOARD_JSON   = REPO_ROOT / "dashboard" / "records.json"
+DATA_JSON        = REPO_ROOT / "data" / "records.json"
+GHL_CSV          = REPO_ROOT / "data" / "ghl_export.csv"
+RETRY            = 3
 
-# Case types that indicate motivated sellers
-CASE_TYPES = [
-    ("Foreclosure",          "NOFC",    "Notice of Foreclosure",   "NOFC"),
-    ("Foreclosure - Tax",    "TAXDEED", "Tax Foreclosure",         "TAXDEED"),
-    ("Partition",            "JUD",     "Partition / Judgment",    "JUD"),
-    ("Probate",              "PRO",     "Probate",                 "PRO"),
-]
 
-# ---------------------------------------------------------------------------
+# ===========================================================================
 # Helpers
-# ---------------------------------------------------------------------------
+# ===========================================================================
+
 def parse_amount(text) -> Optional[float]:
     if not text:
         return None
@@ -94,26 +80,12 @@ def name_variants(full_name: str) -> list:
             variants.add(f"{parts[-1]}, {' '.join(parts[:-1])}")
     return [v for v in variants if v]
 
-def fmt_date(raw: str) -> str:
-    if not raw:
-        return ""
-    for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%m-%d-%Y", "%m/%d/%y"):
-        try:
-            return datetime.strptime(str(raw).strip()[:10], fmt).strftime("%m/%d/%Y")
-        except Exception:
-            continue
-    return str(raw).strip()[:10]
-
 
 # ===========================================================================
-# Court Docket Scraper
+# Sheriff Sale Scraper
 # ===========================================================================
 
-class CourtDocketScraper:
-    """
-    Scrapes Cuyahoga County Common Pleas Court docket for foreclosure cases.
-    The docket is a public ASP.NET site — we use requests + BeautifulSoup.
-    """
+class SheriffScraper:
 
     def __init__(self):
         self.date_to   = datetime.now()
@@ -121,7 +93,7 @@ class CourtDocketScraper:
         self.df_str    = self.date_from.strftime("%m/%d/%Y")
         self.dt_str    = self.date_to.strftime("%m/%d/%Y")
         self.session   = requests.Session()
-        self.session.verify = False   # govt site has SSL cert issues from GitHub runners
+        self.session.verify = False
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                           "AppleWebKit/537.36 Chrome/122.0 Safari/537.36",
@@ -133,70 +105,57 @@ class CourtDocketScraper:
     async def run(self):
         log.info("Scraping Cuyahoga Common Pleas Court docket ...")
         log.info("Date range: %s - %s", self.df_str, self.dt_str)
-
-        # Strategy 1: Sheriff Sale search (direct foreclosure endpoint)
-        self._scrape_sheriff_sales()
-
-        # Strategy 2: General case search by case type
-        if not self.raw_records:
-            self._scrape_requests()
-
-        # Strategy 3: Playwright fallback
+        self._scrape_sheriff()
         if not self.raw_records and PLAYWRIGHT_AVAILABLE:
-            log.info("Trying Playwright for court docket ...")
-            await self._scrape_playwright()
-
+            log.info("Trying Playwright fallback ...")
+            await self._playwright_scrape()
         log.info("Court docket: %d records collected", len(self.raw_records))
 
     # ------------------------------------------------------------------
-    def _scrape_sheriff_sales(self):
-        """
-        Scrape the Sheriff Sale search — direct foreclosure endpoint.
-        URL: /SheriffSearch/search.aspx with dateFrom / dateTo params.
-        """
+    def _scrape_sheriff(self):
         log.info("Trying Sheriff Sale search ...")
         try:
-            # GET the page first for hidden fields
+            # GET page for hidden fields
             r = self.session.get(SHERIFF_SALE_URL, timeout=30)
             r.raise_for_status()
             soup = BeautifulSoup(r.text, "lxml")
 
             form_data = {}
             for inp in soup.find_all("input"):
-                n = inp.get("name","")
-                v = inp.get("value","")
+                n = inp.get("name", "")
+                v = inp.get("value", "")
                 if n:
                     form_data[n] = v
 
-            # Fill date fields — try common field name patterns
+            # Fill date fields
             for k in list(form_data.keys()):
                 kl = k.lower()
-                if "datefrom" in kl or "startdate" in kl or "from" in kl:
+                if any(x in kl for x in ["datefrom","startdate","fromdate"]):
                     form_data[k] = self.df_str
-                elif "dateto" in kl or "enddate" in kl or ("to" in kl and "date" in kl):
+                elif any(x in kl for x in ["dateto","enddate","todate"]):
                     form_data[k] = self.dt_str
 
-            # Also set by common names directly
+            # Common field names
             for fname in ["dateFrom","dateTo","txtDateFrom","txtDateTo",
-                          "StartDate","EndDate","start_date","end_date"]:
-                if fname not in form_data:
-                    if "from" in fname.lower() or "start" in fname.lower():
-                        form_data[fname] = self.df_str
-                    else:
-                        form_data[fname] = self.dt_str
+                          "StartDate","EndDate","dfrom","dto"]:
+                kl = fname.lower()
+                if any(x in kl for x in ["from","start"]):
+                    form_data[fname] = self.df_str
+                else:
+                    form_data[fname] = self.dt_str
 
-            form_data["__EVENTTARGET"]   = ""
+            form_data["__EVENTTARGET"] = ""
             form_data["__EVENTARGUMENT"] = ""
 
-            # Find and set submit button
+            # Find submit button
             for inp in soup.find_all("input", type="submit"):
-                form_data[inp.get("name","btnSearch")] = inp.get("value","Search")
+                form_data[inp.get("name", "btnSearch")] = inp.get("value", "Search")
                 break
 
             resp = self.session.post(SHERIFF_SALE_URL, data=form_data, timeout=30)
             resp.raise_for_status()
 
-            recs = self._parse_sheriff_html(resp.text)
+            recs = self._parse_html(resp.text)
             self.raw_records.extend(recs)
             log.info("Sheriff sales: %d records", len(recs))
 
@@ -204,63 +163,68 @@ class CourtDocketScraper:
             log.warning("Sheriff sale search failed: %s", e)
 
     # ------------------------------------------------------------------
-    def _parse_sheriff_html(self, html: str) -> list[dict]:
+    def _parse_html(self, html: str) -> list[dict]:
         """
-        Parse Cuyahoga County Sheriff Sale results.
-        The table uses merged cells — all data for each property
-        is in a single text blob per row. We extract with regex.
+        Parse sheriff sale results. Each property is a text blob in one cell.
+        Real format:
+          Attorney: NAME Appraised $X Case #: CVxxxxxx
+          Minimum Bid $X TYPE PLAINTIFF VS Sale Date M/D/YYYY
+          OWNER/NAME/ Status ... Parcel # Address Description
+          NNN-NN-NNN STREET_NUMBER STREET_NAME ...
         """
         records = []
         soup = BeautifulSoup(html, "lxml")
 
-        # Get all text blocks from table cells
+        # Collect all text blocks that contain a CV case number
         blocks = []
         for table in soup.find_all("table"):
             for row in table.find_all("tr"):
-                cells = row.find_all(["td","th"])
-                if not cells:
-                    continue
-                # Get full text of the row
-                row_text = " ".join(c.get_text(" ", strip=True) for c in cells)
-                if len(row_text) < 20:
-                    continue
-                # Check if this looks like a property record
-                if re.search(r'cv\s*\d{4,}', row_text, re.I):
-                    blocks.append((row_text, row))
+                text = row.get_text(" ", strip=True)
+                if re.search(r'CV\s*\d{4,}', text, re.I) and len(text) > 50:
+                    blocks.append((text, row))
 
         log.info("Sheriff: found %d property blocks", len(blocks))
         if blocks:
-            log.info("SAMPLE BLOCK: %s", blocks[0][0][:600])
+            log.info("SAMPLE BLOCK: %s", blocks[0][0][:500])
 
-        for block_text, row in blocks:
+        for text, row in blocks:
             try:
-                rec = self._extract_from_block(block_text, row)
+                rec = self._extract(text, row)
                 if rec:
                     records.append(rec)
             except Exception as e:
-                log.debug("Block parse error: %s", e)
+                log.debug("Extract error: %s", e)
 
         return records
 
     # ------------------------------------------------------------------
-    def _extract_from_block(self, text: str, row) -> Optional[dict]:
-        """Extract all fields from a sheriff sale text block."""
+    def _extract(self, text: str, row) -> Optional[dict]:
+        """
+        Extract fields using regex patterns matched to real Cuyahoga
+        sheriff sale text format.
+        """
 
-        # Case number
-        case_m = re.search(r'case\s*#?\s*:?\s*(cv\s*\d{4,})', text, re.I)
+        # ── Case number ──────────────────────────────────────────────
+        case_m = re.search(r'Case\s*#\s*:?\s*(CV\s*\d+)', text, re.I)
         if not case_m:
-            case_m = re.search(r'\b(cv\s*\d{4,})\b', text, re.I)
+            case_m = re.search(r'\b(CV\d{4,})\b', text, re.I)
         if not case_m:
             return None
         case_num = case_m.group(1).replace(" ", "").upper()
 
-        # Sale date
-        date_m = re.search(r'sale\s*date\s*:?\s*(\d{1,2}/\d{1,2}/\d{4})', text, re.I)
+        # ── Attorney / Plaintiff ─────────────────────────────────────
+        # "Attorney: ELLEN FORNASH Appraised"
+        att_m = re.search(r'Attorney\s*:\s*([A-Z][A-Z\s,\.]+?)(?=\s+Appraised|\s+Case\s*#|\s+\$)', text, re.I)
+        plaintiff = att_m.group(1).strip().title() if att_m else ""
+
+        # ── Sale date ────────────────────────────────────────────────
+        # "VS Sale Date 1/12/2026"
+        date_m = re.search(r'Sale\s+Date\s+(\d{1,2}/\d{1,2}/\d{4})', text, re.I)
         if not date_m:
             date_m = re.search(r'\b(\d{1,2}/\d{1,2}/\d{4})\b', text)
         sale_date = date_m.group(1) if date_m else ""
 
-        # Filter by date range
+        # Filter by date
         if sale_date:
             try:
                 dt = datetime.strptime(sale_date, "%m/%d/%Y")
@@ -269,62 +233,74 @@ class CourtDocketScraper:
             except Exception:
                 pass
 
-        # Plaintiff / Attorney / Lender
-        plaintiff_m = re.search(
-            r'(?:attorney|plaintiff|lender|mortgagee)\s*:?\s*([A-Z][A-Za-z\s,\.&]{3,60}?)(?:\s*(?:appraised|vs|case|sale|\$|parcel))',
+        # ── Owner / Defendant ────────────────────────────────────────
+        # "VS Sale Date 1/12/2026 MITCHELL/RUTH/ Status"
+        owner_m = re.search(
+            r'VS\s+Sale\s+Date\s+\d{1,2}/\d{1,2}/\d{4}\s+([A-Z][A-Z/\s,\.\-]{2,60}?)\s+Status',
             text, re.I
         )
-        plaintiff = plaintiff_m.group(1).strip().title() if plaintiff_m else ""
-
-        # Defendant / Owner — appears after "vs" or "mitchell/ruth" style
-        # Pattern: look for names after "vs" keyword
-        defendant_m = re.search(
-            r'\bvs\.?\s+([A-Z][A-Za-z\s,\./-]{3,60}?)(?:\s*(?:status|sale|parcel|address|description|\d{3}-\d{2}))',
-            text, re.I
-        )
-        if not defendant_m:
-            # Try slash-separated names like "mitchell/ruth/"
-            defendant_m = re.search(
-                r'(?:vs\.?\s+|defendant\s*:?\s*)([A-Za-z]+(?:/[A-Za-z]+)+)',
+        if not owner_m:
+            # "VS MITCHELL/RUTH/ Status" without date in between
+            owner_m = re.search(
+                r'\bVS\b\s+([A-Z][A-Z/\s,\.\-]{2,60}?)\s+Status',
                 text, re.I
             )
         owner = ""
-        if defendant_m:
-            raw = defendant_m.group(1).strip()
-            # Clean up slash names: "mitchell/ruth" -> "Mitchell Ruth"
-            owner = " ".join(p.title() for p in re.split(r'[/,]', raw) if p.strip())
+        if owner_m:
+            raw = owner_m.group(1).strip()
+            parts = [p.strip() for p in re.split(r'[/,]', raw) if p.strip()]
+            owner = " ".join(p.title() for p in parts)
 
-        # Property address
-        addr_m = re.search(
-            r'\b(\d{3,5}\s+[A-Za-z][A-Za-z0-9\s]{2,40?}'
-            r'(?:street|st|avenue|ave|drive|dr|road|rd|boulevard|blvd|'
-            r'lane|ln|court|ct|place|pl|way|circle|cir|parkway|pkwy))\b',
-            text, re.I
-        )
-        prop_address = addr_m.group(1).strip().title() if addr_m else ""
-
-        # Zip code
-        zip_m = re.search(r'\b(44\d{3})\b', text)  # Cleveland area zips start with 44
-        prop_zip = zip_m.group(1) if zip_m else ""
-
-        # Parcel number
+        # ── Parcel number ─────────────────────────────────────────────
+        # "703-01-013"
         parcel_m = re.search(r'\b(\d{3}-\d{2}-\d{3})\b', text)
         parcel = parcel_m.group(1) if parcel_m else ""
 
-        # Appraised value
-        amount_m = re.search(r'appraised\s*\$?([\d,]+(?:\.\d{2})?)', text, re.I)
-        if not amount_m:
-            amount_m = re.search(r'minimum\s+bid\s*\$?([\d,]+)', text, re.I)
-        amount = parse_amount(amount_m.group(1)) if amount_m else None
+        # ── Property address ──────────────────────────────────────────
+        # "703-01-013 1395 SOUTH BELVOIR BOULEVARD"
+        prop_address = ""
+        if parcel:
+            # Address comes right after parcel number
+            addr_m = re.search(
+                re.escape(parcel) + r'\s+(\d{1,5}\s+[A-Z][A-Z0-9\s]{3,50})',
+                text, re.I
+            )
+            if addr_m:
+                # Trim at "A SINGLE" or "DWELLING" or similar description words
+                addr_raw = addr_m.group(1)
+                addr_raw = re.sub(r'\s+(A\s+SINGLE|DWELLING|COMMERCIAL|VACANT|LOT|WITH\s+).*$', '', addr_raw, flags=re.I)
+                prop_address = addr_raw.strip().title()
 
-        # Build link
+        if not prop_address:
+            # Fallback: find any street address pattern
+            addr_m = re.search(
+                r'\b(\d{3,5}\s+[A-Z][A-Z\s]{3,40}'
+                r'(?:STREET|ST|AVENUE|AVE|DRIVE|DR|ROAD|RD|BOULEVARD|BLVD|'
+                r'LANE|LN|COURT|CT|PLACE|PL|WAY|CIRCLE|CIR))\b',
+                text, re.I
+            )
+            if addr_m:
+                prop_address = addr_m.group(1).strip().title()
+
+        # ── Zip code ──────────────────────────────────────────────────
+        zip_m = re.search(r'\b(44\d{3})\b', text)
+        prop_zip = zip_m.group(1) if zip_m else ""
+
+        # ── Amount ───────────────────────────────────────────────────
+        # "Appraised $120,000.00"
+        amt_m = re.search(r'Appraised\s+\$?([\d,]+(?:\.\d{2})?)', text, re.I)
+        if not amt_m:
+            amt_m = re.search(r'Minimum\s+Bid\s+\$?([\d,]+)', text, re.I)
+        amount = parse_amount(amt_m.group(1)) if amt_m else None
+
+        # ── Link ─────────────────────────────────────────────────────
         link_tag = row.find("a", href=True)
         href = link_tag["href"] if link_tag else ""
         if href and not href.startswith("http"):
             href = f"{COURT_URL}/{href.lstrip('/')}"
-        # Build link from case number if no direct link
-        if not href and case_num:
-            href = f"{COURT_URL}/Search.aspx?q=searchType%3DCase+Number%26searchString%3D{case_num}"
+        if not href:
+            href = (f"{COURT_URL}/Search.aspx?"
+                    f"q=searchType%3DCase+Number%26searchString%3D{case_num}")
 
         return {
             "doc_num":      case_num,
@@ -347,516 +323,9 @@ class CourtDocketScraper:
             "mail_zip":     "",
             "source":       "Court Docket",
         }
-        records = []
-        soup = BeautifulSoup(html, "lxml")
-
-        for table in soup.find_all("table"):
-            rows = table.find_all("tr")
-            if len(rows) < 2:
-                continue
-
-            header_row = rows[0]
-            headers = [th.get_text(strip=True).lower()
-                       for th in header_row.find_all(["th","td"])]
-            header_str = " ".join(headers)
-
-            if not any(k in header_str for k in
-                       ["case","sale","parcel","address","plaintiff","defendant"]):
-                continue
-
-            # Log actual headers and first data row for debugging
-            log.info("Sheriff table headers: %s", headers)
-            if len(rows) > 1:
-                first = [c.get_text(" ", strip=True)
-                         for c in rows[1].find_all(["td","th"])]
-                log.info("Sheriff first row: %s", first)
-
-            # Map column indices from actual headers
-            col = {}
-            for i, h in enumerate(headers):
-                h = h.strip()
-                if any(k in h for k in ["case #","case no","cv #","case number","caseno"]):
-                    col.setdefault("case_num", i)
-                elif h in ["case", "no", "#"] or "case" in h:
-                    col.setdefault("case_num", i)
-                if any(k in h for k in ["sale date","date of sale","sale dt","scheduled date","saledate"]):
-                    col.setdefault("date", i)
-                elif "date" in h and "case" not in h:
-                    col.setdefault("date", i)
-                if "plaintiff" in h:
-                    col.setdefault("plaintiff", i)
-                if "defendant" in h or "owner" in h:
-                    col.setdefault("defendant", i)
-                if "address" in h or "property addr" in h:
-                    col.setdefault("address", i)
-                if "parcel" in h and "address" not in h:
-                    col.setdefault("parcel", i)
-                if any(k in h for k in ["appraised","appraisal","value","amount","judgment"]):
-                    col.setdefault("amount", i)
-
-            log.info("Sheriff column map: %s", col)
-
-            for row in rows[1:]:
-                cells = [c.get_text(" ", strip=True) for c in row.find_all(["td","th"])]
-                if len(cells) < 3:
-                    continue
-
-                def get(key, default=""):
-                    idx = col.get(key)
-                    if idx is not None and idx < len(cells):
-                        return cells[idx].strip()
-                    return default
-
-                # Use positional if no column map
-                n = len(cells)
-                if not col:
-                    # Typical Cuyahoga order: CaseNum SaleDate Plaintiff Defendant Address Parcel AppValue Status
-                    case_num  = cells[0] if n > 0 else ""
-                    sale_date = cells[1] if n > 1 else ""
-                    plaintiff = cells[2] if n > 2 else ""
-                    defendant = cells[3] if n > 3 else ""
-                    address   = cells[4] if n > 4 else ""
-                    parcel    = cells[5] if n > 5 else ""
-                    amount    = cells[6] if n > 6 else ""
-                else:
-                    case_num  = get("case_num")
-                    sale_date = get("date")
-                    plaintiff = get("plaintiff")
-                    defendant = get("defendant")
-                    address   = get("address")
-                    parcel    = get("parcel")
-                    amount    = get("amount")
-
-                # Clean case number
-                case_match = re.search(r'(CV\s*\d{4,}|\d{2,4}\s*CV\s*\d+)', case_num, re.I)
-                clean_case = case_match.group(1).replace(" ","") if case_match else case_num[:20]
-                if not clean_case:
-                    continue
-
-                # Clean date
-                date_match = re.search(r'\d{1,2}/\d{1,2}/\d{4}', sale_date)
-                clean_date = date_match.group(0) if date_match else ""
-
-                # Clean address
-                addr_match = re.search(
-                    r'\d+\s+[A-Za-z][A-Za-z0-9\s]{3,40?}'
-                    r'(?:ST|AVE|DR|RD|BLVD|LN|CT|PL|WAY|CIR|PKWY|STREET|AVENUE|DRIVE|ROAD|LANE|COURT)\b',
-                    address, re.I
-                )
-                clean_addr = addr_match.group(0).strip() if addr_match else ""
-                if not clean_addr and address and not re.match(r'^(CV|Case|IF NOT|\d{3}-\d{2})', address, re.I):
-                    clean_addr = address[:80]
-
-                zip_match = re.search(r'\b(\d{5})\b', address)
-                clean_zip = zip_match.group(1) if zip_match else ""
-
-                # Clean amount
-                raw_amount = parse_amount(amount)
-                if raw_amount and raw_amount > 50_000_000:
-                    raw_amount = None
-
-                # Clean owner — reject values that look like non-names
-                clean_owner = defendant.strip()
-                if re.match(r'^(CV|IF NOT|PARCEL|CASE #|\d{3}-\d{2})', clean_owner, re.I):
-                    clean_owner = ""
-
-                clean_plaintiff = plaintiff.strip()
-                if re.match(r'^(CV|IF NOT|PARCEL|CASE #|\d{3}-\d{2})', clean_plaintiff, re.I):
-                    clean_plaintiff = ""
-
-                # Build URL
-                link_tag = row.find("a", href=True)
-                href = link_tag["href"] if link_tag else ""
-                if href and not href.startswith("http"):
-                    href = f"{COURT_URL}/{href.lstrip('/')}"
-
-                # Date filter
-                if clean_date:
-                    try:
-                        dt = datetime.strptime(clean_date, "%m/%d/%Y")
-                        if dt < self.date_from:
-                            continue
-                    except Exception:
-                        pass
-
-                records.append({
-                    "doc_num":      clean_case,
-                    "doc_type":     "NOFC",
-                    "cat":          "NOFC",
-                    "cat_label":    "Notice of Foreclosure",
-                    "filed":        clean_date,
-                    "owner":        clean_owner,
-                    "grantee":      clean_plaintiff,
-                    "amount":       raw_amount,
-                    "legal":        parcel,
-                    "clerk_url":    href,
-                    "prop_address": clean_addr,
-                    "prop_city":    "Cleveland",
-                    "prop_state":   "OH",
-                    "prop_zip":     clean_zip,
-                    "mail_address": "",
-                    "mail_city":    "",
-                    "mail_state":   "OH",
-                    "mail_zip":     "",
-                    "source":       "Court Docket",
-                })
-
-        return records
-        records = []
-        soup = BeautifulSoup(html, "lxml")
-
-        for table in soup.find_all("table"):
-            rows = table.find_all("tr")
-            if len(rows) < 2:
-                continue
-
-            # Get headers
-            header_row = rows[0]
-            headers = [th.get_text(strip=True).lower()
-                       for th in header_row.find_all(["th","td"])]
-            header_str = " ".join(headers)
-
-            # Must look like a sheriff sale table
-            if not any(k in header_str for k in
-                       ["case","sale","parcel","address","plaintiff","defendant"]):
-                continue
-
-            # Build column index map from headers
-            col = {}
-            for i, h in enumerate(headers):
-                if any(k in h for k in ["case","cv #","case #","case no"]):
-                    col.setdefault("case_num", i)
-                if any(k in h for k in ["sale date","date of sale","scheduled","filed"]):
-                    col.setdefault("date", i)
-                if "plaintiff" in h or "lender" in h or "bank" in h:
-                    col.setdefault("plaintiff", i)
-                if "defendant" in h or "owner" in h or "debtor" in h:
-                    col.setdefault("defendant", i)
-                if "address" in h or "property" in h or "location" in h:
-                    col.setdefault("address", i)
-                if "parcel" in h and "address" not in h:
-                    col.setdefault("parcel", i)
-                if any(k in h for k in ["appraised","value","amount","judgment"]):
-                    col.setdefault("amount", i)
-
-            for row in rows[1:]:
-                cells = [c.get_text(" ", strip=True) for c in row.find_all(["td","th"])]
-                if len(cells) < 3:
-                    continue
-
-                def get(key, default=""):
-                    idx = col.get(key)
-                    if idx is not None and idx < len(cells):
-                        return cells[idx].strip()
-                    return default
-
-                # Positional fallback if headers didn't map well
-                # Cuyahoga sheriff sale typical order:
-                # 0=CaseNum, 1=SaleDate, 2=Plaintiff, 3=Defendant,
-                # 4=Address, 5=Parcel, 6=AppraisedValue, 7=Status
-                if not col:
-                    case_num  = cells[0] if len(cells) > 0 else ""
-                    sale_date = cells[1] if len(cells) > 1 else ""
-                    plaintiff = cells[2] if len(cells) > 2 else ""
-                    defendant = cells[3] if len(cells) > 3 else ""
-                    address   = cells[4] if len(cells) > 4 else ""
-                    parcel    = cells[5] if len(cells) > 5 else ""
-                    amount    = cells[6] if len(cells) > 6 else ""
-                else:
-                    case_num  = get("case_num")
-                    sale_date = get("date")
-                    plaintiff = get("plaintiff")
-                    defendant = get("defendant")
-                    address   = get("address")
-                    parcel    = get("parcel")
-                    amount    = get("amount")
-
-                # Clean case number — must look like CV + digits
-                case_match = re.search(r'(CV\s*\d+|\d{2}CV\d+)', case_num, re.I)
-                if case_match:
-                    case_num = case_match.group(1).replace(" ","")
-                elif not case_num:
-                    continue
-
-                # Clean date — extract MM/DD/YYYY pattern
-                date_match = re.search(r'\d{1,2}/\d{1,2}/\d{4}', sale_date)
-                clean_date = date_match.group(0) if date_match else ""
-
-                # Clean address — must have a street number
-                addr_match = re.search(
-                    r'\d+\s+[A-Za-z][A-Za-z0-9\s]{3,40}'
-                    r'(?:ST|AVE|DR|RD|BLVD|LN|CT|PL|WAY|CIR|PKWY|STREET|AVENUE|DRIVE|ROAD|LANE|COURT)',
-                    address, re.I
-                )
-                clean_addr = addr_match.group(0).strip() if addr_match else address[:80] if address else ""
-
-                # Clean zip from address if present
-                zip_match = re.search(r'\b(\d{5})\b', address)
-                clean_zip = zip_match.group(1) if zip_match else ""
-
-                # Clean amount — reject absurd values (parcel numbers mistaken for money)
-                raw_amount = parse_amount(amount)
-                if raw_amount and raw_amount > 50_000_000:
-                    raw_amount = None  # parcel number, not a dollar amount
-
-                # Clean owner name — remove junk
-                clean_owner = defendant.strip()
-                # If it looks like a case number or address, discard
-                if re.match(r'^(CV|IF NOT|PARCEL|CASE|703|812|\d{3}-)', clean_owner, re.I):
-                    clean_owner = ""
-
-                # Clean plaintiff
-                clean_plaintiff = plaintiff.strip()
-                if re.match(r'^(CV|IF NOT|PARCEL|CASE|\d{3}-)', clean_plaintiff, re.I):
-                    clean_plaintiff = ""
-
-                # Build clerk URL
-                link_tag = row.find("a", href=True)
-                href = link_tag["href"] if link_tag else ""
-                if href and not href.startswith("http"):
-                    href = f"{COURT_URL}/{href.lstrip('/')}"
-
-                # Filter by date range
-                if clean_date:
-                    try:
-                        dt = datetime.strptime(clean_date, "%m/%d/%Y")
-                        if dt < self.date_from:
-                            continue
-                    except Exception:
-                        pass
-
-                records.append({
-                    "doc_num":      case_num,
-                    "doc_type":     "NOFC",
-                    "cat":          "NOFC",
-                    "cat_label":    "Notice of Foreclosure",
-                    "filed":        clean_date,
-                    "owner":        clean_owner,
-                    "grantee":      clean_plaintiff,
-                    "amount":       raw_amount,
-                    "legal":        parcel,
-                    "clerk_url":    href,
-                    "prop_address": clean_addr,
-                    "prop_city":    "Cleveland",
-                    "prop_state":   "OH",
-                    "prop_zip":     clean_zip,
-                    "mail_address": "",
-                    "mail_city":    "",
-                    "mail_state":   "OH",
-                    "mail_zip":     "",
-                    "source":       "Court Docket",
-                })
-
-        return records
 
     # ------------------------------------------------------------------
-    def _scrape_requests(self):
-        """Scrape the court docket search using requests."""
-        for case_label, code, label, cat in CASE_TYPES:
-            try:
-                records = self._search_case_type(case_label, code, label, cat)
-                if records:
-                    self.raw_records.extend(records)
-                    log.info("  %s -> %d records", case_label, len(records))
-                else:
-                    log.info("  %s -> 0 records", case_label)
-            except Exception as e:
-                log.warning("Failed %s: %s", case_label, e)
-            time.sleep(1)
-
-    # ------------------------------------------------------------------
-    def _search_case_type(self, case_type: str, code: str,
-                          label: str, cat: str) -> list[dict]:
-        records = []
-
-        # Step 1: GET the search page to grab hidden fields
-        search_url = f"{COURT_URL}/Search.aspx"
-        for attempt in range(1, RETRY_ATTEMPTS + 1):
-            try:
-                r = self.session.get(search_url, timeout=30)
-                r.raise_for_status()
-                break
-            except Exception as e:
-                log.warning("GET attempt %d/%d: %s", attempt, RETRY_ATTEMPTS, e)
-                if attempt == RETRY_ATTEMPTS:
-                    return records
-                time.sleep(3 * attempt)
-
-        soup = BeautifulSoup(r.text, "lxml")
-
-        # Extract hidden ASP.NET fields
-        form_data = {}
-        for inp in soup.find_all("input"):
-            name  = inp.get("name","")
-            value = inp.get("value","")
-            if name:
-                form_data[name] = value
-
-        # Fill in search parameters
-        # Common field names on Cuyahoga court docket
-        field_map = {
-            "case_type":  ["ddlCaseType","DropDownList1","caseType","CaseType"],
-            "date_from":  ["txtFiledFrom","txtDateFrom","Filed_From","dtFrom"],
-            "date_to":    ["txtFiledTo","txtDateTo","Filed_To","dtTo"],
-            "search_btn": ["btnSearch","Button1","cmdSearch","Search"],
-        }
-
-        for field_key, field_names in field_map.items():
-            for fname in field_names:
-                if fname in form_data or soup.find(attrs={"name": fname}):
-                    if field_key == "case_type":
-                        form_data[fname] = case_type
-                    elif field_key == "date_from":
-                        form_data[fname] = self.df_str
-                    elif field_key == "date_to":
-                        form_data[fname] = self.dt_str
-                    elif field_key == "search_btn":
-                        form_data[fname] = "Search"
-                    break
-
-        # __doPostBack
-        form_data["__EVENTTARGET"]   = form_data.get("__EVENTTARGET","btnSearch")
-        form_data["__EVENTARGUMENT"] = ""
-
-        # Step 2: POST the search
-        for attempt in range(1, RETRY_ATTEMPTS + 1):
-            try:
-                resp = self.session.post(
-                    search_url, data=form_data, timeout=30
-                )
-                resp.raise_for_status()
-                break
-            except Exception as e:
-                log.warning("POST attempt %d/%d: %s", attempt, RETRY_ATTEMPTS, e)
-                if attempt == RETRY_ATTEMPTS:
-                    return records
-                time.sleep(3 * attempt)
-
-        # Step 3: Parse results
-        page_records = self._parse_docket_html(resp.text, code, label, cat)
-        records.extend(page_records)
-
-        # Step 4: Handle pagination
-        page_num = 1
-        while page_num < 30:
-            next_soup = BeautifulSoup(resp.text, "lxml")
-            next_link = next_soup.find("a", string=re.compile(r"Next|>|>>", re.I))
-            if not next_link:
-                break
-
-            # Extract postback args for next page
-            href = next_link.get("href","")
-            postback_match = re.search(r"__doPostBack\('([^']+)','([^']*)'\)", href)
-            if not postback_match:
-                break
-
-            form_data2 = {}
-            for inp in next_soup.find_all("input"):
-                n = inp.get("name","")
-                v = inp.get("value","")
-                if n:
-                    form_data2[n] = v
-            form_data2["__EVENTTARGET"]   = postback_match.group(1)
-            form_data2["__EVENTARGUMENT"] = postback_match.group(2)
-
-            try:
-                resp = self.session.post(search_url, data=form_data2, timeout=30)
-                resp.raise_for_status()
-                new_recs = self._parse_docket_html(resp.text, code, label, cat)
-                if not new_recs:
-                    break
-                records.extend(new_recs)
-                page_num += 1
-                time.sleep(0.5)
-            except Exception as e:
-                log.warning("Pagination error: %s", e)
-                break
-
-        return records
-
-    # ------------------------------------------------------------------
-    def _parse_docket_html(self, html: str, code: str,
-                            label: str, cat: str) -> list[dict]:
-        records = []
-        soup = BeautifulSoup(html, "lxml")
-
-        for table in soup.find_all("table"):
-            rows = table.find_all("tr")
-            if len(rows) < 2:
-                continue
-
-            headers = [th.get_text(strip=True).lower()
-                       for th in rows[0].find_all(["th","td"])]
-
-            # Must look like a case results table
-            if not any(k in " ".join(headers)
-                       for k in ["case","filed","party","plaintiff","defendant"]):
-                continue
-
-            for row in rows[1:]:
-                cells = [c.get_text(strip=True) for c in row.find_all(["td","th"])]
-                if len(cells) < 3:
-                    continue
-
-                def f(*keys):
-                    for k in keys:
-                        for i, h in enumerate(headers):
-                            if k in h and i < len(cells):
-                                return cells[i]
-                    return ""
-
-                link_tag = row.find("a", href=True)
-                case_url = ""
-                if link_tag:
-                    href = link_tag.get("href","")
-                    case_url = href if href.startswith("http") else f"{COURT_URL}/{href.lstrip('/')}"
-
-                case_num   = f("case","number","no","cv")
-                filed      = fmt_date(f("filed","date","file"))
-                plaintiff  = f("plaintiff","lender","bank","party")
-                defendant  = f("defendant","owner","debtor")
-                address    = f("address","property","parcel")
-                amount_str = f("amount","debt","balance","judgment")
-
-                # Filter by date
-                if filed:
-                    try:
-                        dt = datetime.strptime(filed, "%m/%d/%Y")
-                        if dt < self.date_from:
-                            continue
-                    except Exception:
-                        pass
-
-                if not case_num and not filed:
-                    continue
-
-                records.append({
-                    "doc_num":      case_num,
-                    "doc_type":     code,
-                    "cat":          cat,
-                    "cat_label":    label,
-                    "filed":        filed,
-                    "owner":        defendant or "",
-                    "grantee":      plaintiff or "",
-                    "amount":       parse_amount(amount_str),
-                    "legal":        "",
-                    "clerk_url":    case_url,
-                    "prop_address": address,
-                    "prop_city":    "Cleveland",
-                    "prop_state":   "OH",
-                    "prop_zip":     "",
-                    "mail_address": "",
-                    "mail_city":    "",
-                    "mail_state":   "OH",
-                    "mail_zip":     "",
-                    "source":       "Court Docket",
-                })
-
-        return records
-
-    # ------------------------------------------------------------------
-    async def _scrape_playwright(self):
-        """Playwright fallback for the court docket."""
+    async def _playwright_scrape(self):
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(
                 headless=True,
@@ -869,63 +338,40 @@ class CourtDocketScraper:
                 ignore_https_errors=True,
             )).new_page()
 
-            for case_label, code, label, cat in CASE_TYPES:
-                try:
-                    await page.goto(
-                        f"{COURT_URL}/Search.aspx",
-                        wait_until="networkidle",
-                        timeout=40_000,
-                    )
-                    await asyncio.sleep(2)
+            try:
+                await page.goto(SHERIFF_SALE_URL, wait_until="networkidle", timeout=40_000)
+                await asyncio.sleep(2)
 
-                    # Fill case type
-                    for sel in ["#ddlCaseType","select[name*='CaseType']",
-                                "select[name*='caseType']"]:
-                        try:
-                            await page.select_option(sel, label=case_label)
-                            break
-                        except Exception:
-                            continue
+                for sel in ["input[name*='dateFrom']","input[name*='StartDate']","#dateFrom"]:
+                    try:
+                        await page.fill(sel, self.df_str); break
+                    except Exception:
+                        continue
 
-                    # Fill date from
-                    for sel in ["#txtFiledFrom","input[name*='FiledFrom']",
-                                "input[name*='dateFrom']"]:
-                        try:
-                            await page.fill(sel, self.df_str)
-                            break
-                        except Exception:
-                            continue
+                for sel in ["input[name*='dateTo']","input[name*='EndDate']","#dateTo"]:
+                    try:
+                        await page.fill(sel, self.dt_str); break
+                    except Exception:
+                        continue
 
-                    # Fill date to
-                    for sel in ["#txtFiledTo","input[name*='FiledTo']",
-                                "input[name*='dateTo']"]:
-                        try:
-                            await page.fill(sel, self.dt_str)
-                            break
-                        except Exception:
-                            continue
+                for sel in ["input[type='submit']","button:has-text('Search')"]:
+                    try:
+                        await page.click(sel)
+                        await page.wait_for_load_state("networkidle", timeout=25_000)
+                        break
+                    except Exception:
+                        continue
 
-                    # Click search
-                    for sel in ["#btnSearch","input[value*='Search']",
-                                "button:has-text('Search')"]:
-                        try:
-                            await page.click(sel)
-                            break
-                        except Exception:
-                            continue
+                await asyncio.sleep(2)
+                content = await page.content()
+                recs = self._parse_html(content)
+                self.raw_records.extend(recs)
+                log.info("Playwright sheriff: %d records", len(recs))
 
-                    await page.wait_for_load_state("networkidle", timeout=25_000)
-                    await asyncio.sleep(2)
-
-                    content = await page.content()
-                    recs = self._parse_docket_html(content, code, label, cat)
-                    self.raw_records.extend(recs)
-                    log.info("  PW %s -> %d", case_label, len(recs))
-
-                except Exception as e:
-                    log.warning("PW error for %s: %s", case_label, e)
-
-            await browser.close()
+            except Exception as e:
+                log.warning("Playwright error: %s", e)
+            finally:
+                await browser.close()
 
 
 # ===========================================================================
@@ -938,6 +384,7 @@ class ParcelLookup:
 
     def load(self):
         session = requests.Session()
+        session.verify = False
         session.headers.update({"User-Agent": "CuyahogaLeadScraper/1.0"})
         total = self._load_gis(session)
         if total > 0:
@@ -946,42 +393,39 @@ class ParcelLookup:
             log.warning("Parcel data unavailable — addresses will be skipped")
 
     def _load_gis(self, session) -> int:
-        # Try multiple known Cuyahoga County GIS endpoints
+        # Try multiple GIS endpoints
         urls = [
+            "https://data-cuyahoga.opendata.arcgis.com/datasets/ffaaa1651d5540419469375d680f3245_0/query",
             "https://gis.cuyahogacounty.gov/arcgis/rest/services/OpenData/Parcels/FeatureServer/0/query",
-            "https://gis.cuyahogacounty.us/arcgis/rest/services/OpenData/Parcels/FeatureServer/0/query",
-            "https://gis.cuyahogacounty.gov/arcgis/rest/services/Parcels/FeatureServer/0/query",
+            "https://fiscalhub.gis.cuyahogacounty.gov/arcgis/rest/services/Parcels/FeatureServer/0/query",
         ]
-        offset, size, total = 0, 1000, 0
-        working_url = None
-
-        # Find which URL works
-        for candidate in urls:
+        for url in urls:
             try:
-                test = session.get(candidate, params={"where":"1=1","outFields":"OWNER","f":"json","resultRecordCount":1,"returnGeometry":"false"}, timeout=15)
-                if test.status_code == 200:
-                    working_url = candidate
-                    log.info("GIS URL found: %s", candidate)
-                    break
+                test = session.get(url, params={
+                    "where":"1=1","outFields":"OWNER","f":"json",
+                    "resultRecordCount":1,"returnGeometry":"false"
+                }, timeout=15)
+                if test.status_code == 200 and "features" in test.text:
+                    log.info("GIS URL working: %s", url)
+                    return self._page_gis(session, url)
             except Exception:
                 continue
+        log.warning("No working GIS URL found — skipping parcel enrichment")
+        return 0
 
-        if not working_url:
-            log.warning("No working GIS URL found — skipping parcel enrichment")
-            return 0
-
-        url = working_url
+    def _page_gis(self, session, url) -> int:
+        offset, size, total = 0, 1000, 0
         try:
             while True:
                 params = {
-                    "where":             "1=1",
-                    "outFields":         ("OWNER,OWN1,SITEADDR,SITE_ADDR,SITE_CITY,"
-                                          "SITE_ZIP,MAILADR1,ADDR_1,MAILCITY,CITY,"
-                                          "STATE,MAILZIP,ZIP"),
-                    "f":                 "json",
-                    "resultOffset":      offset,
+                    "where": "1=1",
+                    "outFields": ("OWNER,OWN1,SITEADDR,SITE_ADDR,SITE_CITY,"
+                                  "SITE_ZIP,MAILADR1,ADDR_1,MAILCITY,CITY,"
+                                  "STATE,MAILZIP,ZIP"),
+                    "f": "json",
+                    "resultOffset": offset,
                     "resultRecordCount": size,
-                    "returnGeometry":    "false",
+                    "returnGeometry": "false",
                 }
                 r = session.get(url, params=params, timeout=60)
                 r.raise_for_status()
@@ -996,7 +440,7 @@ class ParcelLookup:
                 offset += size
                 time.sleep(0.2)
         except Exception as e:
-            log.warning("GIS API: %s", e)
+            log.warning("GIS paging error: %s", e)
         log.info("GIS parcels loaded: %d", total)
         return total
 
@@ -1005,20 +449,20 @@ class ParcelLookup:
             for k in keys:
                 for key in [k, k.upper(), k.lower()]:
                     v = r.get(key)
-                    if v and str(v).strip() not in ("","None","null"):
+                    if v and str(v).strip() not in ("", "None", "null"):
                         return str(v).strip()
             return ""
-        owner = g("OWNER","OWN1")
+        owner = g("OWNER", "OWN1")
         if not owner:
             return
         rec = {
-            "site_addr":  g("SITEADDR","SITE_ADDR"),
+            "site_addr":  g("SITEADDR", "SITE_ADDR"),
             "site_city":  g("SITE_CITY"),
             "site_zip":   g("SITE_ZIP"),
-            "mail_addr":  g("MAILADR1","ADDR_1"),
-            "mail_city":  g("MAILCITY","CITY"),
+            "mail_addr":  g("MAILADR1", "ADDR_1"),
+            "mail_city":  g("MAILCITY", "CITY"),
             "mail_state": g("STATE") or "OH",
-            "mail_zip":   g("MAILZIP","ZIP"),
+            "mail_zip":   g("MAILZIP", "ZIP"),
         }
         for v in name_variants(owner):
             self._by_owner[v].append(rec)
@@ -1043,9 +487,9 @@ class LeadScorer:
     @staticmethod
     def score(rec: dict, all_recs: list) -> tuple:
         flags, points = [], 30
-        cat   = rec.get("cat","")
-        dtype = rec.get("doc_type","")
-        owner = rec.get("owner","")
+        cat   = rec.get("cat", "")
+        dtype = rec.get("doc_type", "")
+        owner = rec.get("owner", "")
         amt   = rec.get("amount")
 
         if cat == "LP":      flags.append("Lis pendens");      points += 10
@@ -1053,17 +497,13 @@ class LeadScorer:
         if cat == "TAXDEED": flags.append("Tax deed");         points += 10
         if cat == "JUD":     flags.append("Judgment lien");    points += 10
         if cat == "LIEN":
-            if dtype in ("LNIRS","LNFED","LNCORPTX"):
-                flags.append("Tax lien")
-            elif dtype == "LNMECH":
-                flags.append("Mechanic lien")
-            elif dtype == "LNHOA":
-                flags.append("HOA lien")
-            else:
-                flags.append("Lien")
+            if dtype in ("LNIRS","LNFED","LNCORPTX"): flags.append("Tax lien")
+            elif dtype == "LNMECH": flags.append("Mechanic lien")
+            elif dtype == "LNHOA":  flags.append("HOA lien")
+            else: flags.append("Lien")
             points += 10
-        if cat == "PRO":     flags.append("Probate / estate"); points += 10
-        if cat == "RELLP":   flags.append("Lis pendens");      points += 5
+        if cat == "PRO":  flags.append("Probate / estate"); points += 10
+        if cat == "RELLP": flags.append("Lis pendens");     points += 5
 
         norm = normalize_name(owner)
         if norm:
@@ -1073,10 +513,8 @@ class LeadScorer:
                 points += 20
 
         if amt:
-            if amt > 100_000:
-                flags.append("High debt (>$100k)"); points += 15
-            elif amt > 50_000:
-                points += 10
+            if amt > 100_000: flags.append("High debt (>$100k)"); points += 15
+            elif amt > 50_000: points += 10
 
         try:
             dt = datetime.strptime(rec.get("filed","").strip(), "%m/%d/%Y")
@@ -1091,7 +529,7 @@ class LeadScorer:
         if owner and re.search(r"\b(LLC|INC|CORP|LTD|TRUST|ESTATE)\b", owner, re.I):
             flags.append("LLC / corp owner"); points += 5
 
-        src = rec.get("source","")
+        src = rec.get("source", "")
         if src == "Manual Upload":
             flags.append("Recorder filing"); points += 5
 
@@ -1112,7 +550,7 @@ GHL_COLS = [
 def split_name(n):
     if not n: return "", ""
     if "," in n:
-        p = [x.strip() for x in n.split(",",1)]
+        p = [x.strip() for x in n.split(",", 1)]
         return p[1].title(), p[0].title()
     p = n.split()
     return (p[0].title(), " ".join(p[1:]).title()) if len(p) > 1 else ("", p[0].title())
@@ -1123,63 +561,58 @@ def export_csv(records: list, path: Path):
         w = csv.DictWriter(f, fieldnames=GHL_COLS)
         w.writeheader()
         for r in records:
-            fn, ln = split_name(r.get("owner",""))
+            fn, ln = split_name(r.get("owner", ""))
             amt = r.get("amount")
             w.writerow({
-                "First Name":        fn,
-                "Last Name":         ln,
-                "Mailing Address":   r.get("mail_address",""),
-                "Mailing City":      r.get("mail_city",""),
-                "Mailing State":     r.get("mail_state","OH"),
-                "Mailing Zip":       r.get("mail_zip",""),
-                "Property Address":  r.get("prop_address",""),
-                "Property City":     r.get("prop_city","Cleveland"),
-                "Property State":    r.get("prop_state","OH"),
-                "Property Zip":      r.get("prop_zip",""),
-                "Lead Type":         r.get("cat_label",""),
-                "Document Type":     r.get("doc_type",""),
-                "Date Filed":        r.get("filed",""),
-                "Document Number":   r.get("doc_num",""),
+                "First Name": fn, "Last Name": ln,
+                "Mailing Address":   r.get("mail_address", ""),
+                "Mailing City":      r.get("mail_city", ""),
+                "Mailing State":     r.get("mail_state", "OH"),
+                "Mailing Zip":       r.get("mail_zip", ""),
+                "Property Address":  r.get("prop_address", ""),
+                "Property City":     r.get("prop_city", "Cleveland"),
+                "Property State":    r.get("prop_state", "OH"),
+                "Property Zip":      r.get("prop_zip", ""),
+                "Lead Type":         r.get("cat_label", ""),
+                "Document Type":     r.get("doc_type", ""),
+                "Date Filed":        r.get("filed", ""),
+                "Document Number":   r.get("doc_num", ""),
                 "Amount/Debt Owed":  f"${amt:,.2f}" if amt else "",
-                "Seller Score":      r.get("score",0),
-                "Motivated Seller Flags": "; ".join(r.get("flags",[])),
-                "Source":            r.get("source","Court Docket"),
-                "Public Records URL":r.get("clerk_url",""),
+                "Seller Score":      r.get("score", 0),
+                "Motivated Seller Flags": "; ".join(r.get("flags", [])),
+                "Source":            r.get("source", "Court Docket"),
+                "Public Records URL": r.get("clerk_url", ""),
             })
     log.info("GHL CSV: %d rows -> %s", len(records), path)
 
 
 # ===========================================================================
-# Main
+# Save (merges with manual uploads)
 # ===========================================================================
 
-def save_json(data, *paths):
+def save_json(data: dict, *paths: Path):
     for path in paths:
         path.parent.mkdir(parents=True, exist_ok=True)
-        # Merge with any existing manually-uploaded records
-        existing = []
+        existing_manual = []
         if path.exists():
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     old = json.load(f)
-                    existing = [r for r in old.get("records", [])
-                                if r.get("source") == "Manual Upload"]
-                    if existing:
-                        log.info("Preserving %d manually uploaded records from %s",
-                                 len(existing), path.name)
+                existing_manual = [r for r in old.get("records", [])
+                                   if r.get("source") == "Manual Upload"]
+                if existing_manual:
+                    log.info("Preserving %d manual records from %s",
+                             len(existing_manual), path.name)
             except Exception:
                 pass
 
-        # Merge: auto records + manual records
-        all_records = data["records"] + existing
-
-        # Deduplicate across both sources
+        all_recs = data["records"] + existing_manual
         seen = {}
-        for rec in all_records:
+        for rec in all_recs:
             key = rec.get("doc_num") or rec.get("clerk_url") or str(id(rec))
-            if key not in seen or rec.get("score",0) > seen[key].get("score",0):
+            if key not in seen or rec.get("score", 0) > seen[key].get("score", 0):
                 seen[key] = rec
-        merged = sorted(seen.values(), key=lambda r: r.get("score",0), reverse=True)
+        merged = sorted(seen.values(), key=lambda r: r.get("score", 0), reverse=True)
 
         output = {**data, "records": merged, "total": len(merged),
                   "with_address": sum(1 for r in merged
@@ -1189,28 +622,32 @@ def save_json(data, *paths):
         log.info("Saved %s (%d records)", path, len(merged))
 
 
+# ===========================================================================
+# Main
+# ===========================================================================
+
 async def main():
     log.info("=" * 60)
     log.info("Cuyahoga County Lead Scraper — Court Docket")
     log.info("Range: %s -> %s",
-             (datetime.now()-timedelta(days=LOOKBACK_DAYS)).strftime("%m/%d/%Y"),
+             (datetime.now() - timedelta(days=LOOKBACK_DAYS)).strftime("%m/%d/%Y"),
              datetime.now().strftime("%m/%d/%Y"))
     log.info("=" * 60)
 
-    # 1. Parcel data
+    # 1. Load parcel data
     parcel = ParcelLookup()
     log.info("Loading parcel data ...")
     parcel.load()
 
-    # 2. Scrape court docket
-    scraper = CourtDocketScraper()
+    # 2. Scrape
+    scraper = SheriffScraper()
     await scraper.run()
     records = scraper.raw_records
 
     # 3. Enrich addresses from parcel data
     for rec in records:
         if not rec.get("prop_address"):
-            match = parcel.lookup(rec.get("owner",""))
+            match = parcel.lookup(rec.get("owner", ""))
             if match:
                 rec.update({
                     "prop_address": match["site_addr"],
@@ -1235,13 +672,13 @@ async def main():
     records = sorted(seen.values(), key=lambda r: r["score"], reverse=True)
     log.info("Unique auto records: %d", len(records))
 
-    # 6. Save (merges with any existing manual uploads)
+    # 6. Save
     with_addr = sum(1 for r in records if r.get("prop_address") or r.get("mail_address"))
     output = {
         "fetched_at": datetime.now(timezone.utc).isoformat(),
         "source":     "Cuyahoga County Court Docket + Manual Uploads",
         "date_range": {
-            "from": (datetime.now()-timedelta(days=LOOKBACK_DAYS)).strftime("%m/%d/%Y"),
+            "from": (datetime.now() - timedelta(days=LOOKBACK_DAYS)).strftime("%m/%d/%Y"),
             "to":   datetime.now().strftime("%m/%d/%Y"),
         },
         "total":        len(records),
