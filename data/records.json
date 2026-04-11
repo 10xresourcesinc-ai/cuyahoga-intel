@@ -1,5 +1,5 @@
 {
-  "fetched_at": "2026-04-11T17:04:10.835964+00:00",
+  "fetched_at": "2026-04-11T23:12:45.399933+00:00",
   "source": "Cuyahoga County Court Docket + Manual Uploads",
   "date_range": {
     "from": "04/04/2026",
@@ -70,7 +70,7 @@
       "grantee": "",
       "amount": 250000.0,
       "legal": "",
-      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl11$lnkCaseNum','')",
+      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl12$lnkCaseNum','')",
       "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
@@ -237,14 +237,14 @@
       ]
     },
     {
-      "doc_num": "CV15848659",
+      "doc_num": "CV21947416",
       "doc_type": "NOFC",
       "cat": "NOFC",
       "cat_label": "Notice of Foreclosure",
       "filed": "",
       "owner": "",
       "grantee": "",
-      "amount": 37712.0,
+      "amount": 0.0,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl04$lnkCaseNum','')",
       "prop_address": "",
@@ -262,14 +262,14 @@
       ]
     },
     {
-      "doc_num": "CV21947416",
+      "doc_num": "CV15848659",
       "doc_type": "NOFC",
       "cat": "NOFC",
       "cat_label": "Notice of Foreclosure",
       "filed": "",
       "owner": "",
       "grantee": "",
-      "amount": 0.0,
+      "amount": 37712.0,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl05$lnkCaseNum','')",
       "prop_address": "",
@@ -346,7 +346,7 @@
       "grantee": "",
       "amount": 0.0,
       "legal": "",
-      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl12$lnkCaseNum','')",
+      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl11$lnkCaseNum','')",
       "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
