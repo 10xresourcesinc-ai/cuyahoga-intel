@@ -224,14 +224,10 @@ class SheriffScraper:
             date_m = re.search(r'\b(\d{1,2}/\d{1,2}/\d{4})\b', text)
         sale_date = date_m.group(1) if date_m else ""
 
-        # Filter by date
-        if sale_date:
-            try:
-                dt = datetime.strptime(sale_date, "%m/%d/%Y")
-                if dt < self.date_from:
-                    return None
-            except Exception:
-                pass
+        # Note: Sheriff sale listings show scheduled sale dates which may be
+        # months in the past or future. We keep all active listings.
+        # The filing/case date is what matters for our lookback window.
+        # Don't filter by sale_date here.
 
         # ── Owner / Defendant ────────────────────────────────────────
         # "VS Sale Date 1/12/2026 MITCHELL/RUTH/ Status"
