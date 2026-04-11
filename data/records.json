@@ -1,9 +1,9 @@
 {
-  "fetched_at": "2026-04-10T21:23:35.491345+00:00",
+  "fetched_at": "2026-04-11T09:10:03.483485+00:00",
   "source": "Cuyahoga County Court Docket + Manual Uploads",
   "date_range": {
-    "from": "04/03/2026",
-    "to": "04/10/2026"
+    "from": "04/04/2026",
+    "to": "04/11/2026"
   },
   "total": 15,
   "with_address": 0,
@@ -44,7 +44,7 @@
       "grantee": "",
       "amount": 189082.0,
       "legal": "",
-      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl09$lnkCaseNum','')",
+      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl11$lnkCaseNum','')",
       "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
@@ -146,7 +146,7 @@
       "grantee": "",
       "amount": 66667.0,
       "legal": "",
-      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl11$lnkCaseNum','')",
+      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl13$lnkCaseNum','')",
       "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
@@ -312,14 +312,14 @@
       ]
     },
     {
-      "doc_num": "CV17886864",
+      "doc_num": "CV24100048",
       "doc_type": "NOFC",
       "cat": "NOFC",
       "cat_label": "Notice of Foreclosure",
       "filed": "",
       "owner": "",
       "grantee": "",
-      "amount": 12505.0,
+      "amount": 0.0,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl08$lnkCaseNum','')",
       "prop_address": "",
@@ -337,16 +337,16 @@
       ]
     },
     {
-      "doc_num": "CV24100048",
+      "doc_num": "CV17886864",
       "doc_type": "NOFC",
       "cat": "NOFC",
       "cat_label": "Notice of Foreclosure",
       "filed": "",
       "owner": "",
       "grantee": "",
-      "amount": 0.0,
+      "amount": 12505.0,
       "legal": "",
-      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl13$lnkCaseNum','')",
+      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl09$lnkCaseNum','')",
       "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
