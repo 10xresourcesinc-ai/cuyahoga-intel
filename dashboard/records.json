@@ -1,28 +1,131 @@
 {
-<<<<<<< HEAD
-  "fetched_at": "2026-04-11T17:04:10.835964+00:00",
-=======
-  "fetched_at": "2026-04-11T23:15:57.567673+00:00",
->>>>>>> 779a126bfbea2a2e22676c9552d165ec3d6ecbc4
+  "fetched_at": "2026-04-11T23:24:07.096628+00:00",
   "source": "Cuyahoga County Court Docket + Manual Uploads",
   "date_range": {
     "from": "04/04/2026",
     "to": "04/11/2026"
   },
   "total": 15,
-  "with_address": 0,
+  "with_address": 11,
   "records": [
+    {
+      "doc_num": "CV19924853",
+      "doc_type": "NOFC",
+      "cat": "NOFC",
+      "cat_label": "Notice of Foreclosure",
+      "filed": "1/12/2026",
+      "owner": "Mitchell Ruth",
+      "grantee": "Ellen Fornash",
+      "amount": 120000.0,
+      "legal": "703-01-013",
+      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl02$lnkCaseNum','')",
+      "prop_address": "1395  South Belvoir Boulevard",
+      "prop_city": "Cleveland",
+      "prop_state": "OH",
+      "prop_zip": "",
+      "mail_address": "",
+      "mail_city": "",
+      "mail_state": "OH",
+      "mail_zip": "",
+      "source": "Court Docket",
+      "score": 60,
+      "flags": [
+        "Pre-foreclosure",
+        "High debt (>$100k)",
+        "Address found"
+      ]
+    },
     {
       "doc_num": "CV19913692",
       "doc_type": "NOFC",
       "cat": "NOFC",
       "cat_label": "Notice of Foreclosure",
-      "filed": "",
-      "owner": "",
-      "grantee": "",
-      "amount": 220000.0,
-      "legal": "",
+      "filed": "12/22/2025",
+      "owner": "Harris Michael G",
+      "grantee": "Robert Hoose",
+      "amount": 330000.0,
+      "legal": "734-39-024",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl06$lnkCaseNum','')",
+      "prop_address": "23501  South Woodland Rd",
+      "prop_city": "Cleveland",
+      "prop_state": "OH",
+      "prop_zip": "",
+      "mail_address": "",
+      "mail_city": "",
+      "mail_state": "OH",
+      "mail_zip": "",
+      "source": "Court Docket",
+      "score": 60,
+      "flags": [
+        "Pre-foreclosure",
+        "High debt (>$100k)",
+        "Address found"
+      ]
+    },
+    {
+      "doc_num": "CV21951106",
+      "doc_type": "NOFC",
+      "cat": "NOFC",
+      "cat_label": "Notice of Foreclosure",
+      "filed": "11/17/2025",
+      "owner": "Patay Karl Jeno",
+      "grantee": "Ted Humbert",
+      "amount": 375000.0,
+      "legal": "263-17-013",
+      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl12$lnkCaseNum','')",
+      "prop_address": "8998  Usher Road",
+      "prop_city": "Cleveland",
+      "prop_state": "OH",
+      "prop_zip": "",
+      "mail_address": "",
+      "mail_city": "",
+      "mail_state": "OH",
+      "mail_zip": "",
+      "source": "Court Docket",
+      "score": 60,
+      "flags": [
+        "Pre-foreclosure",
+        "High debt (>$100k)",
+        "Address found"
+      ]
+    },
+    {
+      "doc_num": "CV21951714",
+      "doc_type": "NOFC",
+      "cat": "NOFC",
+      "cat_label": "Notice of Foreclosure",
+      "filed": "12/15/2025",
+      "owner": "Shefton Khrystalynn",
+      "grantee": "Jason Ramsey",
+      "amount": 100000.0,
+      "legal": "812-35-355",
+      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl03$lnkCaseNum','')",
+      "prop_address": "554  Turney Road One Unit In A Frame Condominium",
+      "prop_city": "Cleveland",
+      "prop_state": "OH",
+      "prop_zip": "",
+      "mail_address": "",
+      "mail_city": "",
+      "mail_state": "OH",
+      "mail_zip": "",
+      "source": "Court Docket",
+      "score": 55,
+      "flags": [
+        "Pre-foreclosure",
+        "Address found"
+      ]
+    },
+    {
+      "doc_num": "CV21947416",
+      "doc_type": "NOFC",
+      "cat": "NOFC",
+      "cat_label": "Notice of Foreclosure",
+      "filed": "1/5/2026",
+      "owner": "Regalbuto Cheryl",
+      "grantee": "Matthew Markley",
+      "amount": 250000.0,
+      "legal": "",
+      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl04$lnkCaseNum','')",
       "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
@@ -36,6 +139,32 @@
       "flags": [
         "Pre-foreclosure",
         "High debt (>$100k)"
+      ]
+    },
+    {
+      "doc_num": "CV14834135",
+      "doc_type": "NOFC",
+      "cat": "NOFC",
+      "cat_label": "Notice of Foreclosure",
+      "filed": "11/24/2025",
+      "owner": "Green June S.",
+      "grantee": "Jason Ramsey",
+      "amount": 65000.0,
+      "legal": "736-11-314",
+      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl07$lnkCaseNum','')",
+      "prop_address": "3271  Warrensville Center Road One Unit In A Brick Condom",
+      "prop_city": "Cleveland",
+      "prop_state": "OH",
+      "prop_zip": "",
+      "mail_address": "",
+      "mail_city": "",
+      "mail_state": "OH",
+      "mail_zip": "",
+      "source": "Court Docket",
+      "score": 55,
+      "flags": [
+        "Pre-foreclosure",
+        "Address found"
       ]
     },
     {
@@ -48,11 +177,7 @@
       "grantee": "",
       "amount": 189082.0,
       "legal": "",
-<<<<<<< HEAD
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl09$lnkCaseNum','')",
-=======
-      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl08$lnkCaseNum','')",
->>>>>>> 779a126bfbea2a2e22676c9552d165ec3d6ecbc4
       "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
@@ -69,17 +194,17 @@
       ]
     },
     {
-      "doc_num": "CV21951106",
+      "doc_num": "CV24100048",
       "doc_type": "NOFC",
       "cat": "NOFC",
       "cat_label": "Notice of Foreclosure",
-      "filed": "",
-      "owner": "",
-      "grantee": "",
-      "amount": 250000.0,
-      "legal": "",
+      "filed": "10/14/2025",
+      "owner": "Howell Richard E.",
+      "grantee": "Chris Manolis",
+      "amount": 75000.0,
+      "legal": "143-09-042",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl11$lnkCaseNum','')",
-      "prop_address": "",
+      "prop_address": "4314  East 175Th Street",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -91,21 +216,21 @@
       "score": 55,
       "flags": [
         "Pre-foreclosure",
-        "High debt (>$100k)"
+        "Address found"
       ]
     },
     {
-      "doc_num": "CV19924853",
+      "doc_num": "CV22959396",
       "doc_type": "NOFC",
       "cat": "NOFC",
       "cat_label": "Notice of Foreclosure",
-      "filed": "",
-      "owner": "",
-      "grantee": "",
-      "amount": 80000.0,
-      "legal": "",
-      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl02$lnkCaseNum','')",
-      "prop_address": "",
+      "filed": "12/8/2025",
+      "owner": "Galarza Narciso A.",
+      "grantee": "James Sassano",
+      "amount": 100000.0,
+      "legal": "022-19-127",
+      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl13$lnkCaseNum','')",
+      "prop_address": "13726  Leroy Avenue",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -114,9 +239,36 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 50,
+      "score": 55,
       "flags": [
-        "Pre-foreclosure"
+        "Pre-foreclosure",
+        "Address found"
+      ]
+    },
+    {
+      "doc_num": "CV24103128",
+      "doc_type": "NOFC",
+      "cat": "NOFC",
+      "cat_label": "Notice of Foreclosure",
+      "filed": "10/27/2025",
+      "owner": "Norena Valeska",
+      "grantee": "Ann Johnson",
+      "amount": 100000.0,
+      "legal": "018-17-132",
+      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl16$lnkCaseNum','')",
+      "prop_address": "10608  Linnet Avenue",
+      "prop_city": "Cleveland",
+      "prop_state": "OH",
+      "prop_zip": "",
+      "mail_address": "",
+      "mail_city": "",
+      "mail_state": "OH",
+      "mail_zip": "",
+      "source": "Court Docket",
+      "score": 55,
+      "flags": [
+        "Pre-foreclosure",
+        "Address found"
       ]
     },
     {
@@ -130,31 +282,6 @@
       "amount": 77749.0,
       "legal": "",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl10$lnkCaseNum','')",
-      "prop_address": "",
-      "prop_city": "Cleveland",
-      "prop_state": "OH",
-      "prop_zip": "",
-      "mail_address": "",
-      "mail_city": "",
-      "mail_state": "OH",
-      "mail_zip": "",
-      "source": "Court Docket",
-      "score": 50,
-      "flags": [
-        "Pre-foreclosure"
-      ]
-    },
-    {
-      "doc_num": "CV22959396",
-      "doc_type": "NOFC",
-      "cat": "NOFC",
-      "cat_label": "Notice of Foreclosure",
-      "filed": "",
-      "owner": "",
-      "grantee": "",
-      "amount": 66667.0,
-      "legal": "",
-      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl13$lnkCaseNum','')",
       "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
@@ -195,92 +322,17 @@
       ]
     },
     {
-      "doc_num": "CV24103128",
-      "doc_type": "NOFC",
-      "cat": "NOFC",
-      "cat_label": "Notice of Foreclosure",
-      "filed": "",
-      "owner": "",
-      "grantee": "",
-      "amount": 66667.0,
-      "legal": "",
-      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl16$lnkCaseNum','')",
-      "prop_address": "",
-      "prop_city": "Cleveland",
-      "prop_state": "OH",
-      "prop_zip": "",
-      "mail_address": "",
-      "mail_city": "",
-      "mail_state": "OH",
-      "mail_zip": "",
-      "source": "Court Docket",
-      "score": 50,
-      "flags": [
-        "Pre-foreclosure"
-      ]
-    },
-    {
-      "doc_num": "CV21951714",
-      "doc_type": "NOFC",
-      "cat": "NOFC",
-      "cat_label": "Notice of Foreclosure",
-      "filed": "",
-      "owner": "",
-      "grantee": "",
-      "amount": 0.0,
-      "legal": "",
-      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl03$lnkCaseNum','')",
-      "prop_address": "",
-      "prop_city": "Cleveland",
-      "prop_state": "OH",
-      "prop_zip": "",
-      "mail_address": "",
-      "mail_city": "",
-      "mail_state": "OH",
-      "mail_zip": "",
-      "source": "Court Docket",
-      "score": 40,
-      "flags": [
-        "Pre-foreclosure"
-      ]
-    },
-    {
       "doc_num": "CV15848659",
       "doc_type": "NOFC",
       "cat": "NOFC",
       "cat_label": "Notice of Foreclosure",
-      "filed": "",
-      "owner": "",
-      "grantee": "",
-      "amount": 37712.0,
-      "legal": "",
-      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl04$lnkCaseNum','')",
-      "prop_address": "",
-      "prop_city": "Cleveland",
-      "prop_state": "OH",
-      "prop_zip": "",
-      "mail_address": "",
-      "mail_city": "",
-      "mail_state": "OH",
-      "mail_zip": "",
-      "source": "Court Docket",
-      "score": 40,
-      "flags": [
-        "Pre-foreclosure"
-      ]
-    },
-    {
-      "doc_num": "CV21947416",
-      "doc_type": "NOFC",
-      "cat": "NOFC",
-      "cat_label": "Notice of Foreclosure",
-      "filed": "",
-      "owner": "",
-      "grantee": "",
+      "filed": "11/5/2025",
+      "owner": "Casey Dennis",
+      "grantee": "Appraised",
       "amount": 0.0,
-      "legal": "",
+      "legal": "117-08-061",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl05$lnkCaseNum','')",
-      "prop_address": "",
+      "prop_address": "1713  Cliffview Road",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -289,34 +341,10 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 40,
+      "score": 45,
       "flags": [
-        "Pre-foreclosure"
-      ]
-    },
-    {
-      "doc_num": "CV14834135",
-      "doc_type": "NOFC",
-      "cat": "NOFC",
-      "cat_label": "Notice of Foreclosure",
-      "filed": "",
-      "owner": "",
-      "grantee": "",
-      "amount": 0.0,
-      "legal": "",
-      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl07$lnkCaseNum','')",
-      "prop_address": "",
-      "prop_city": "Cleveland",
-      "prop_state": "OH",
-      "prop_zip": "",
-      "mail_address": "",
-      "mail_city": "",
-      "mail_state": "OH",
-      "mail_zip": "",
-      "source": "Court Docket",
-      "score": 40,
-      "flags": [
-        "Pre-foreclosure"
+        "Pre-foreclosure",
+        "Address found"
       ]
     },
     {
@@ -324,42 +352,13 @@
       "doc_type": "NOFC",
       "cat": "NOFC",
       "cat_label": "Notice of Foreclosure",
-      "filed": "",
-      "owner": "",
-      "grantee": "",
-      "amount": 12505.0,
-      "legal": "",
-      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl09$lnkCaseNum','')",
-      "prop_address": "",
-      "prop_city": "Cleveland",
-      "prop_state": "OH",
-      "prop_zip": "",
-      "mail_address": "",
-      "mail_city": "",
-      "mail_state": "OH",
-      "mail_zip": "",
-      "source": "Court Docket",
-      "score": 40,
-      "flags": [
-        "Pre-foreclosure"
-      ]
-    },
-    {
-      "doc_num": "CV24100048",
-      "doc_type": "NOFC",
-      "cat": "NOFC",
-      "cat_label": "Notice of Foreclosure",
-      "filed": "",
-      "owner": "",
-      "grantee": "",
+      "filed": "1/7/2026",
+      "owner": "Ewell Paul E.",
+      "grantee": "Appraised",
       "amount": 0.0,
-      "legal": "",
-<<<<<<< HEAD
-      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl12$lnkCaseNum','')",
-=======
-      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl11$lnkCaseNum','')",
->>>>>>> 779a126bfbea2a2e22676c9552d165ec3d6ecbc4
-      "prop_address": "",
+      "legal": "762-02-071",
+      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl08$lnkCaseNum','')",
+      "prop_address": "4452  Lee Heights Blvd",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -368,9 +367,10 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 40,
+      "score": 45,
       "flags": [
-        "Pre-foreclosure"
+        "Pre-foreclosure",
+        "Address found"
       ]
     },
     {
@@ -378,13 +378,13 @@
       "doc_type": "NOFC",
       "cat": "NOFC",
       "cat_label": "Notice of Foreclosure",
-      "filed": "",
-      "owner": "",
-      "grantee": "",
-      "amount": 32576.0,
-      "legal": "",
+      "filed": "11/12/2025",
+      "owner": "Crowder Robert L.",
+      "grantee": "Appraised",
+      "amount": 0.0,
+      "legal": "541-12-012",
       "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl15$lnkCaseNum','')",
-      "prop_address": "",
+      "prop_address": "4748  East 88Th Street",
       "prop_city": "Cleveland",
       "prop_state": "OH",
       "prop_zip": "",
@@ -393,9 +393,10 @@
       "mail_state": "OH",
       "mail_zip": "",
       "source": "Court Docket",
-      "score": 40,
+      "score": 45,
       "flags": [
-        "Pre-foreclosure"
+        "Pre-foreclosure",
+        "Address found"
       ]
     }
   ]
