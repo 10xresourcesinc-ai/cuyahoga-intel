@@ -371,59 +371,97 @@ class SheriffScraper:
 
 
 # ===========================================================================
-# Parcel Lookup
+# Parcel Lookup — MyPlace + GIS enrichment
 # ===========================================================================
 
 class ParcelLookup:
+    """
+    Enriches leads with parcel data from multiple Cuyahoga County sources:
+    1. MyPlace GIS API — owner, mailing address, assessed value, homestead
+    2. Bulk parcel dataset — for batch owner name lookups
+    """
+
+    # MyPlace parcel service (from Geocortex directory)
+    MYPLACE_URL = ("https://gis.cuyahogacounty.us/server/rest/services/"
+                   "MyPLACE/Parcels_WMA_GJOIN_WGS84/MapServer/0/query")
+
+    # CAMA parcel service with tax/assessment data
+    CAMA_URLS = [
+        "https://geospatial.gis.cuyahogacounty.gov/server/rest/services/Parcels/FeatureServer/0/query",
+        "https://gis.cuyahogacounty.us/server/rest/services/CCFO/TaxParcels_WGS84/FeatureServer/0/query",
+        "https://data-cuyahoga.opendata.arcgis.com/datasets/ffaaa1651d5540419469375d680f3245_0/query",
+    ]
+
     def __init__(self):
-        self._by_owner = defaultdict(list)
+        self._by_owner   = defaultdict(list)
+        self._by_parcel  = {}
+        self._by_address = {}
+        self._session    = None
+        self._working_url = None
 
     def load(self):
-        session = requests.Session()
-        session.verify = False
-        session.headers.update({"User-Agent": "CuyahogaLeadScraper/1.0"})
-        total = self._load_gis(session)
-        if total > 0:
-            log.info("Parcel index: %d owner entries", len(self._by_owner))
-        else:
-            log.warning("Parcel data unavailable — addresses will be skipped")
+        self._session = requests.Session()
+        self._session.verify = False
+        self._session.headers.update({"User-Agent": "CuyahogaLeadScraper/1.0"})
 
-    def _load_gis(self, session) -> int:
-        # Try multiple GIS endpoints
-        urls = [
-            "https://data-cuyahoga.opendata.arcgis.com/datasets/ffaaa1651d5540419469375d680f3245_0/query",
-            "https://gis.cuyahogacounty.gov/arcgis/rest/services/OpenData/Parcels/FeatureServer/0/query",
-            "https://fiscalhub.gis.cuyahogacounty.gov/arcgis/rest/services/Parcels/FeatureServer/0/query",
-        ]
-        for url in urls:
+        # Find working bulk URL
+        for url in self.CAMA_URLS:
             try:
-                test = session.get(url, params={
-                    "where":"1=1","outFields":"OWNER","f":"json",
-                    "resultRecordCount":1,"returnGeometry":"false"
+                r = self._session.get(url, params={
+                    "where": "1=1", "outFields": "OWNER,OWN1",
+                    "f": "json", "resultRecordCount": 1,
+                    "returnGeometry": "false"
                 }, timeout=15)
-                if test.status_code == 200 and "features" in test.text:
-                    log.info("GIS URL working: %s", url)
-                    return self._page_gis(session, url)
+                if r.status_code == 200 and "features" in r.text:
+                    self._working_url = url
+                    log.info("Parcel GIS URL: %s", url)
+                    break
             except Exception:
                 continue
-        log.warning("No working GIS URL found — skipping parcel enrichment")
-        return 0
 
-    def _page_gis(self, session, url) -> int:
+        # Try MyPlace URL too
+        try:
+            r = self._session.get(self.MYPLACE_URL, params={
+                "where": "1=1", "outFields": "*",
+                "f": "json", "resultRecordCount": 1,
+                "returnGeometry": "false"
+            }, timeout=15)
+            if r.status_code == 200 and "features" in r.text:
+                log.info("MyPlace URL working")
+                # Use MyPlace as primary if CAMA didn't work
+                if not self._working_url:
+                    self._working_url = self.MYPLACE_URL
+        except Exception:
+            pass
+
+        if self._working_url:
+            total = self._load_bulk()
+            log.info("Parcel index: %d owners, %d parcels, %d addresses",
+                     len(self._by_owner), len(self._by_parcel), len(self._by_address))
+        else:
+            log.warning("No parcel GIS URL working — will try per-parcel lookups")
+
+    def _load_bulk(self) -> int:
+        """Load bulk parcel data into memory indexes."""
         offset, size, total = 0, 1000, 0
+        fields = ("OWNER,OWN1,SITEADDR,SITE_ADDR,SITESTREET,SITE_CITY,SITE_ZIP,"
+                  "MAILADR1,ADDR_1,MAILCITY,CITY,STATE,MAILZIP,ZIP,"
+                  "PARCELNO,PARID,APN,"
+                  "DELINQUENT,DELINQ,DELINQ_AMT,BACK_TAX,"
+                  "HOMESTEAD,HMSTD,HOMESTEAD_EXM,"
+                  "APPVAL,APPRVAL,ASSESSED,LAND_VALUE,BLDG_VALUE,"
+                  "OWNER_OCC,OUTOFSTATE,OUT_OF_STATE")
         try:
             while True:
                 params = {
-                    "where": "1=1",
-                    "outFields": ("OWNER,OWN1,SITEADDR,SITE_ADDR,SITE_CITY,"
-                                  "SITE_ZIP,MAILADR1,ADDR_1,MAILCITY,CITY,"
-                                  "STATE,MAILZIP,ZIP"),
-                    "f": "json",
-                    "resultOffset": offset,
+                    "where":             "1=1",
+                    "outFields":         fields,
+                    "f":                 "json",
+                    "resultOffset":      offset,
                     "resultRecordCount": size,
-                    "returnGeometry": "false",
+                    "returnGeometry":    "false",
                 }
-                r = session.get(url, params=params, timeout=60)
+                r = self._session.get(self._working_url, params=params, timeout=60)
                 r.raise_for_status()
                 features = r.json().get("features", [])
                 if not features:
@@ -436,8 +474,8 @@ class ParcelLookup:
                 offset += size
                 time.sleep(0.2)
         except Exception as e:
-            log.warning("GIS paging error: %s", e)
-        log.info("GIS parcels loaded: %d", total)
+            log.warning("Bulk load error: %s", e)
+        log.info("Parcels loaded: %d", total)
         return total
 
     def _ingest(self, r: dict):
@@ -445,31 +483,105 @@ class ParcelLookup:
             for k in keys:
                 for key in [k, k.upper(), k.lower()]:
                     v = r.get(key)
-                    if v and str(v).strip() not in ("", "None", "null"):
+                    if v and str(v).strip() not in ("", "None", "null", "0"):
                         return str(v).strip()
             return ""
-        owner = g("OWNER", "OWN1")
-        if not owner:
-            return
-        rec = {
-            "site_addr":  g("SITEADDR", "SITE_ADDR"),
-            "site_city":  g("SITE_CITY"),
-            "site_zip":   g("SITE_ZIP"),
-            "mail_addr":  g("MAILADR1", "ADDR_1"),
-            "mail_city":  g("MAILCITY", "CITY"),
-            "mail_state": g("STATE") or "OH",
-            "mail_zip":   g("MAILZIP", "ZIP"),
-        }
-        for v in name_variants(owner):
-            self._by_owner[v].append(rec)
 
-    def lookup(self, name: str) -> Optional[dict]:
+        owner   = g("OWNER", "OWN1")
+        parcel  = g("PARCELNO", "PARID", "APN")
+        site    = g("SITEADDR", "SITE_ADDR", "SITESTREET")
+        city    = g("SITE_CITY")
+        zipcode = g("SITE_ZIP")
+
+        rec = {
+            "owner":       normalize_name(owner),
+            "site_addr":   site,
+            "site_city":   city or "Cleveland",
+            "site_zip":    zipcode,
+            "mail_addr":   g("MAILADR1", "ADDR_1"),
+            "mail_city":   g("MAILCITY", "CITY"),
+            "mail_state":  g("STATE") or "OH",
+            "mail_zip":    g("MAILZIP", "ZIP"),
+            "parcel":      parcel,
+            # Enrichment fields
+            "delinquent":  g("DELINQUENT", "DELINQ", "BACK_TAX") not in ("", "N", "0", "No"),
+            "delinq_amt":  g("DELINQ_AMT"),
+            "homestead":   g("HOMESTEAD", "HMSTD", "HOMESTEAD_EXM") not in ("", "N", "0", "No"),
+            "appraised":   g("APPVAL", "APPRVAL", "ASSESSED"),
+            "out_of_state":g("OUTOFSTATE", "OUT_OF_STATE") not in ("", "N", "0", "No"),
+        }
+
+        if owner:
+            for v in name_variants(owner):
+                self._by_owner[v].append(rec)
+        if parcel:
+            self._by_parcel[parcel] = rec
+        if site:
+            self._by_address[normalize_name(site)] = rec
+
+    def lookup_parcel(self, parcel_num: str) -> Optional[dict]:
+        """Look up by parcel number — most reliable."""
+        if not parcel_num:
+            return None
+        clean = parcel_num.strip()
+        hit = self._by_parcel.get(clean)
+        if hit:
+            return hit
+        # Try without dashes
+        nodash = clean.replace("-", "")
+        for k, v in self._by_parcel.items():
+            if k.replace("-", "") == nodash:
+                return v
+        # Try per-API lookup if not in bulk data
+        return self._api_lookup_parcel(clean)
+
+    def lookup_owner(self, name: str) -> Optional[dict]:
+        """Look up by owner name."""
         if not name:
             return None
         for v in name_variants(name):
             hits = self._by_owner.get(v)
             if hits:
                 return hits[0]
+        return None
+
+    def lookup_address(self, address: str) -> Optional[dict]:
+        """Look up by property address."""
+        if not address:
+            return None
+        norm = normalize_name(address)
+        hit = self._by_address.get(norm)
+        if hit:
+            return hit
+        # Try partial match
+        for k, v in self._by_address.items():
+            if norm in k or k in norm:
+                return v
+        return None
+
+    def lookup(self, name: str) -> Optional[dict]:
+        """Convenience method — look up by owner name."""
+        return self.lookup_owner(name)
+
+    def _api_lookup_parcel(self, parcel: str) -> Optional[dict]:
+        """Per-parcel API lookup for parcels not in bulk data."""
+        if not self._session or not self._working_url:
+            return None
+        try:
+            r = self._session.get(self._working_url, params={
+                "where":          f"PARCELNO='{parcel}' OR PARID='{parcel}'",
+                "outFields":      "*",
+                "f":              "json",
+                "resultRecordCount": 1,
+                "returnGeometry": "false",
+            }, timeout=15)
+            if r.status_code == 200:
+                features = r.json().get("features", [])
+                if features:
+                    self._ingest(features[0].get("attributes", {}))
+                    return self._by_parcel.get(parcel)
+        except Exception:
+            pass
         return None
 
 
@@ -525,9 +637,12 @@ class LeadScorer:
         if owner and re.search(r"\b(LLC|INC|CORP|LTD|TRUST|ESTATE)\b", owner, re.I):
             flags.append("LLC / corp owner"); points += 5
 
-        src = rec.get("source", "")
-        if src == "Manual Upload":
-            flags.append("Recorder filing"); points += 5
+        if rec.get("delinquent"):
+            flags.append("Delinquent taxes"); points += 15
+        if rec.get("out_of_state"):
+            flags.append("Out-of-state owner"); points += 10
+        if rec.get("homestead") is False and rec.get("prop_address"):
+            flags.append("No homestead exemption"); points += 5
 
         return min(100, max(0, points)), list(dict.fromkeys(flags))
 
@@ -541,6 +656,8 @@ GHL_COLS = [
     "Property Address","Property City","Property State","Property Zip",
     "Lead Type","Document Type","Date Filed","Document Number","Amount/Debt Owed",
     "Seller Score","Motivated Seller Flags","Source","Public Records URL",
+    "Parcel Number","Appraised Value","Delinquent Taxes","Delinquent Amount",
+    "Homestead Exemption","Out-of-State Owner",
 ]
 
 def split_name(n):
@@ -578,6 +695,12 @@ def export_csv(records: list, path: Path):
                 "Motivated Seller Flags": "; ".join(r.get("flags", [])),
                 "Source":            r.get("source", "Court Docket"),
                 "Public Records URL": r.get("clerk_url", ""),
+                "Parcel Number":     r.get("legal", ""),
+                "Appraised Value":   r.get("appraised", ""),
+                "Delinquent Taxes":  "Yes" if r.get("delinquent") else "No",
+                "Delinquent Amount": r.get("delinq_amt", ""),
+                "Homestead Exemption": "Yes" if r.get("homestead") else "No",
+                "Out-of-State Owner": "Yes" if r.get("out_of_state") else "No",
             })
     log.info("GHL CSV: %d rows -> %s", len(records), path)
 
@@ -641,19 +764,40 @@ async def main():
     records = scraper.raw_records
 
     # 3. Enrich addresses from parcel data
+    enriched = 0
     for rec in records:
-        if not rec.get("prop_address"):
-            match = parcel.lookup(rec.get("owner", ""))
-            if match:
-                rec.update({
-                    "prop_address": match["site_addr"],
-                    "prop_city":    match["site_city"],
-                    "prop_zip":     match["site_zip"],
-                    "mail_address": match["mail_addr"],
-                    "mail_city":    match["mail_city"],
-                    "mail_state":   match["mail_state"],
-                    "mail_zip":     match["mail_zip"],
-                })
+        match = None
+        # Try parcel number first (most reliable)
+        if rec.get("legal"):
+            match = parcel.lookup_parcel(rec["legal"])
+        # Then try property address
+        if not match and rec.get("prop_address"):
+            match = parcel.lookup_address(rec["prop_address"])
+        # Then try owner name
+        if not match and rec.get("owner"):
+            match = parcel.lookup_owner(rec["owner"])
+
+        if match:
+            # Fill in address if missing
+            if not rec.get("prop_address") and match.get("site_addr"):
+                rec["prop_address"] = match["site_addr"]
+                rec["prop_city"]    = match["site_city"] or "Cleveland"
+                rec["prop_zip"]     = match["site_zip"]
+            # Always fill mailing address
+            if match.get("mail_addr"):
+                rec["mail_address"] = match["mail_addr"]
+                rec["mail_city"]    = match["mail_city"]
+                rec["mail_state"]   = match["mail_state"] or "OH"
+                rec["mail_zip"]     = match["mail_zip"]
+            # Add enrichment fields
+            rec["delinquent"]   = match.get("delinquent", False)
+            rec["delinq_amt"]   = match.get("delinq_amt", "")
+            rec["homestead"]    = match.get("homestead", False)
+            rec["appraised"]    = match.get("appraised", "")
+            rec["out_of_state"] = match.get("out_of_state", False)
+            enriched += 1
+
+    log.info("Enriched %d/%d records with parcel data", enriched, len(records))
 
     # 4. Score
     for rec in records:
