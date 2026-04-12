@@ -385,10 +385,14 @@ class ParcelLookup:
     MYPLACE_URL = ("https://gis.cuyahogacounty.us/server/rest/services/"
                    "MyPLACE/Parcels_WMA_GJOIN_WGS84/MapServer/0/query")
 
-    # CAMA parcel service with tax/assessment data
+    # CAMA parcel service with tax/assessment data — try new geospatial hub first
     CAMA_URLS = [
+        # New CuyahogaGIS Hub (replacing old opendata site)
         "https://geospatial.gis.cuyahogacounty.gov/server/rest/services/Parcels/FeatureServer/0/query",
-        "https://gis.cuyahogacounty.us/server/rest/services/CCFO/TaxParcels_WGS84/FeatureServer/0/query",
+        "https://geospatial.gis.cuyahogacounty.gov/server/rest/services/CCFO/TaxParcels_WGS84/FeatureServer/0/query",
+        # MyPlace service
+        "https://gis.cuyahogacounty.us/server/rest/services/MyPLACE/Parcels_WMA_GJOIN_WGS84/MapServer/0/query",
+        # Old opendata (deprecated but may still work)
         "https://data-cuyahoga.opendata.arcgis.com/datasets/ffaaa1651d5540419469375d680f3245_0/query",
     ]
 
@@ -564,25 +568,85 @@ class ParcelLookup:
         return self.lookup_owner(name)
 
     def _api_lookup_parcel(self, parcel: str) -> Optional[dict]:
-        """Per-parcel API lookup for parcels not in bulk data."""
-        if not self._session or not self._working_url:
+        """Per-parcel API lookup using MyPlace web scrape as fallback."""
+        if not self._session:
             return None
+
+        # Try GIS API first
+        if self._working_url:
+            try:
+                clean = parcel.replace("-","")
+                r = self._session.get(self._working_url, params={
+                    "where":          f"UPPER(REPLACE(PARCELNO,'-',''))='{clean}' OR UPPER(REPLACE(PARID,'-',''))='{clean}'",
+                    "outFields":      "*",
+                    "f":              "json",
+                    "resultRecordCount": 1,
+                    "returnGeometry": "false",
+                }, timeout=15)
+                if r.status_code == 200:
+                    features = r.json().get("features", [])
+                    if features:
+                        self._ingest(features[0].get("attributes", {}))
+                        hit = self._by_parcel.get(parcel)
+                        if hit:
+                            return hit
+            except Exception as e:
+                log.debug("GIS per-parcel lookup failed: %s", e)
+
+        # Fallback: scrape MyPlace web page
         try:
-            r = self._session.get(self._working_url, params={
-                "where":          f"PARCELNO='{parcel}' OR PARID='{parcel}'",
-                "outFields":      "*",
-                "f":              "json",
-                "resultRecordCount": 1,
-                "returnGeometry": "false",
-            }, timeout=15)
+            url = f"https://myplace.cuyahogacounty.gov/en-US/REPI.aspx?parcelid={parcel}"
+            r = self._session.get(url, timeout=15)
             if r.status_code == 200:
-                features = r.json().get("features", [])
-                if features:
-                    self._ingest(features[0].get("attributes", {}))
-                    return self._by_parcel.get(parcel)
-        except Exception:
-            pass
+                soup = BeautifulSoup(r.text, "lxml")
+                rec = self._parse_myplace_html(soup, parcel)
+                if rec:
+                    self._by_parcel[parcel] = rec
+                    return rec
+        except Exception as e:
+            log.debug("MyPlace web lookup failed: %s", e)
+
         return None
+
+    def _parse_myplace_html(self, soup, parcel: str) -> Optional[dict]:
+        """Parse MyPlace property detail page."""
+        text = soup.get_text(" ", strip=True)
+
+        def find_after(label: str, text: str, chars: int = 80) -> str:
+            idx = text.upper().find(label.upper())
+            if idx >= 0:
+                return text[idx+len(label):idx+len(label)+chars].strip()
+            return ""
+
+        owner     = find_after("Owner Name:", text, 60)
+        site_addr = find_after("Property Address:", text, 60)
+        mail_addr = find_after("Mailing Address:", text, 60)
+        city      = find_after("City:", text, 30)
+        state     = find_after("State:", text, 10)
+        zipcode   = find_after("Zip:", text, 10)
+        appraised = find_after("Appraised Value:", text, 20)
+        homestead = "homestead" in text.lower() and "yes" in text[text.lower().find("homestead"):text.lower().find("homestead")+50].lower()
+        delinquent = "delinquent" in text.lower()
+
+        if not owner and not site_addr:
+            return None
+
+        return {
+            "owner":       normalize_name(owner),
+            "site_addr":   site_addr,
+            "site_city":   city or "Cleveland",
+            "site_zip":    re.search(r'\b(44\d{3})\b', zipcode or text or "").group(1) if re.search(r'\b(44\d{3})\b', zipcode or text or "") else "",
+            "mail_addr":   mail_addr,
+            "mail_city":   city,
+            "mail_state":  state or "OH",
+            "mail_zip":    zipcode,
+            "parcel":      parcel,
+            "delinquent":  delinquent,
+            "delinq_amt":  "",
+            "homestead":   homestead,
+            "appraised":   appraised,
+            "out_of_state": False,
+        }
 
 
 # ===========================================================================
