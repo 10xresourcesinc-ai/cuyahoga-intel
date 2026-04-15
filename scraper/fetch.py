@@ -408,42 +408,76 @@ class ParcelLookup:
         self._session.verify = False
         self._session.headers.update({"User-Agent": "CuyahogaLeadScraper/1.0"})
 
-        # Find working bulk URL
+        # Test each GIS URL but don't do bulk load yet
+        # (bulk load returns empty from deprecated endpoints)
+        # Instead we do per-parcel lookups during enrichment
         for url in self.CAMA_URLS:
             try:
                 r = self._session.get(url, params={
-                    "where": "1=1", "outFields": "OWNER,OWN1",
-                    "f": "json", "resultRecordCount": 1,
+                    "where": "PARCELNO='703-01-013'",
+                    "outFields": "OWNER,PARCELNO,SITEADDR",
+                    "f": "json",
+                    "resultRecordCount": 1,
                     "returnGeometry": "false"
                 }, timeout=15)
-                if r.status_code == 200 and "features" in r.text:
-                    self._working_url = url
-                    log.info("Parcel GIS URL: %s", url)
-                    break
+                if r.status_code == 200:
+                    data = r.json()
+                    if data.get("features"):
+                        self._working_url = url
+                        log.info("Parcel per-parcel URL: %s", url)
+                        break
             except Exception:
                 continue
 
-        # Try MyPlace URL too
+        # Test MyPlace URL
         try:
             r = self._session.get(self.MYPLACE_URL, params={
-                "where": "1=1", "outFields": "*",
-                "f": "json", "resultRecordCount": 1,
+                "where": "PARCELNO='703-01-013'",
+                "outFields": "OWNER,PARCELNO",
+                "f": "json",
+                "resultRecordCount": 1,
                 "returnGeometry": "false"
             }, timeout=15)
-            if r.status_code == 200 and "features" in r.text:
-                log.info("MyPlace URL working")
-                # Use MyPlace as primary if CAMA didn't work
+            if r.status_code == 200 and r.json().get("features"):
                 if not self._working_url:
                     self._working_url = self.MYPLACE_URL
+                log.info("MyPlace per-parcel URL working")
         except Exception:
             pass
 
         if self._working_url:
-            total = self._load_bulk()
-            log.info("Parcel index: %d owners, %d parcels, %d addresses",
-                     len(self._by_owner), len(self._by_parcel), len(self._by_address))
+            log.info("Will use per-parcel lookups via: %s", self._working_url)
         else:
-            log.warning("No parcel GIS URL working — will try per-parcel lookups")
+            log.warning("No parcel API working — will use MyPlace web scrape")
+
+    def enrich_records(self, records: list) -> int:
+        """Enrich records with parcel data. Returns count enriched."""
+        if not self._session:
+            return 0
+        enriched = 0
+        for rec in records:
+            parcel = rec.get("legal", "")
+            if not parcel:
+                continue
+            match = self._api_lookup_parcel(parcel)
+            if match:
+                if not rec.get("prop_address") and match.get("site_addr"):
+                    rec["prop_address"] = match["site_addr"]
+                    rec["prop_city"]    = match.get("site_city") or "Cleveland"
+                    rec["prop_zip"]     = match.get("site_zip", "")
+                if match.get("mail_addr"):
+                    rec["mail_address"] = match["mail_addr"]
+                    rec["mail_city"]    = match.get("mail_city", "")
+                    rec["mail_state"]   = match.get("mail_state") or "OH"
+                    rec["mail_zip"]     = match.get("mail_zip", "")
+                rec["delinquent"]   = match.get("delinquent", False)
+                rec["delinq_amt"]   = match.get("delinq_amt", "")
+                rec["homestead"]    = match.get("homestead", False)
+                rec["appraised"]    = match.get("appraised", "")
+                rec["out_of_state"] = match.get("out_of_state", False)
+                enriched += 1
+            time.sleep(0.3)  # be polite to the API
+        return enriched
 
     def _load_bulk(self) -> int:
         """Load bulk parcel data into memory indexes."""
@@ -828,39 +862,8 @@ async def main():
     records = scraper.raw_records
 
     # 3. Enrich addresses from parcel data
-    enriched = 0
-    for rec in records:
-        match = None
-        # Try parcel number first (most reliable)
-        if rec.get("legal"):
-            match = parcel.lookup_parcel(rec["legal"])
-        # Then try property address
-        if not match and rec.get("prop_address"):
-            match = parcel.lookup_address(rec["prop_address"])
-        # Then try owner name
-        if not match and rec.get("owner"):
-            match = parcel.lookup_owner(rec["owner"])
-
-        if match:
-            # Fill in address if missing
-            if not rec.get("prop_address") and match.get("site_addr"):
-                rec["prop_address"] = match["site_addr"]
-                rec["prop_city"]    = match["site_city"] or "Cleveland"
-                rec["prop_zip"]     = match["site_zip"]
-            # Always fill mailing address
-            if match.get("mail_addr"):
-                rec["mail_address"] = match["mail_addr"]
-                rec["mail_city"]    = match["mail_city"]
-                rec["mail_state"]   = match["mail_state"] or "OH"
-                rec["mail_zip"]     = match["mail_zip"]
-            # Add enrichment fields
-            rec["delinquent"]   = match.get("delinquent", False)
-            rec["delinq_amt"]   = match.get("delinq_amt", "")
-            rec["homestead"]    = match.get("homestead", False)
-            rec["appraised"]    = match.get("appraised", "")
-            rec["out_of_state"] = match.get("out_of_state", False)
-            enriched += 1
-
+    log.info("Enriching records with parcel data ...")
+    enriched = parcel.enrich_records(records)
     log.info("Enriched %d/%d records with parcel data", enriched, len(records))
 
     # 4. Score
