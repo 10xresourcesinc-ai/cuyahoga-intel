@@ -367,26 +367,22 @@ class ParcelLookup:
         self._session.verify = False
         self._session.headers.update({"User-Agent": "CuyahogaLeadScraper/1.0"})
 
-        # Test each GIS URL to find one that works
-        for url in self.CAMA_URLS:
-            try:
-                r = self._session.get(url, params={
-                    "where": "PARCELNO='703-01-013'",
-                    "outFields": "OWNER,PARCELNO,SITEADDR",
-                    "f": "json",
-                    "resultRecordCount": 1,
-                    "returnGeometry": "false"
-                }, timeout=15)
-                if r.status_code == 200:
-                    data = r.json()
-                    if data.get("features"):
-                        self._working_url = url
-                        log.info("Parcel API working: %s", url)
-                        break
-            except Exception:
-                continue
+        # Test MyPlace URL with correct field name (parcelpin)
+        try:
+            r = self._session.get(self.MYPLACE_URL, params={
+                "where": "parcelpin='703010013'",
+                "outFields": "parcelpin,parcel_owner,par_addr_all,mail_addr_street,mail_city,mail_state,mail_zip,certified_tax_total",
+                "f": "json",
+                "resultRecordCount": 1,
+                "returnGeometry": "false"
+            }, timeout=15)
+            if r.status_code == 200 and r.json().get("features"):
+                self._working_url = self.MYPLACE_URL
+                log.info("MyPlace API working with parcelpin field: %s", self._working_url)
+        except Exception as e:
+            log.debug("MyPlace test failed: %s", e)
 
-        # If none of the CAMA URLs worked, always fall back to MyPlace URL directly
+        # Always use MyPlace URL as fallback regardless
         if not self._working_url:
             self._working_url = self.MYPLACE_URL
             log.info("Using MyPlace URL as fallback: %s", self._working_url)
@@ -504,14 +500,14 @@ class ParcelLookup:
         if not self._session:
             return None
 
-        # Try GIS API first (FIX: was "if not self._working_url" — should be "if self._working_url")
+        # Try GIS API using correct field name: parcelpin (no dashes)
         if self._working_url:
             try:
                 clean = parcel.replace("-","")
                 log.info("Parcel API lookup: %s via %s", parcel, self._working_url)
                 r = self._session.get(self._working_url, params={
-                    "where":          f"UPPER(REPLACE(PARCELNO,'-',''))='{clean}' OR UPPER(REPLACE(PARID,'-',''))='{clean}'",
-                    "outFields":      "*",
+                    "where":          f"parcelpin='{clean}'",
+                    "outFields":      "parcelpin,parcel_owner,deeded_owner,par_addr_all,par_city,par_zip,mail_name,mail_addr_street,mail_city,mail_state,mail_zip,certified_tax_total,gross_certified_total",
                     "f":              "json",
                     "resultRecordCount": 1,
                     "returnGeometry": "false",
@@ -519,10 +515,28 @@ class ParcelLookup:
                 if r.status_code == 200:
                     features = r.json().get("features", [])
                     if features:
-                        self._ingest(features[0].get("attributes", {}))
-                        hit = self._by_parcel.get(parcel)
-                        if hit:
-                            return hit
+                        attrs = features[0].get("attributes", {})
+                        # Map API fields to our internal format
+                        rec = {
+                            "owner":       normalize_name(attrs.get("parcel_owner") or attrs.get("deeded_owner") or ""),
+                            "site_addr":   attrs.get("par_addr_all") or "",
+                            "site_city":   attrs.get("par_city") or "Cleveland",
+                            "site_zip":    str(int(attrs["par_zip"])) if attrs.get("par_zip") else "",
+                            "mail_addr":   attrs.get("mail_addr_street") or "",
+                            "mail_city":   attrs.get("mail_city") or "",
+                            "mail_state":  attrs.get("mail_state") or "OH",
+                            "mail_zip":    attrs.get("mail_zip") or "",
+                            "parcel":      parcel,
+                            "delinquent":  False,
+                            "delinq_amt":  "",
+                            "homestead":   False,
+                            "appraised":   str(attrs.get("certified_tax_total") or attrs.get("gross_certified_total") or ""),
+                            "out_of_state": (attrs.get("mail_state") or "OH").upper() not in ("OH", ""),
+                        }
+                        if rec["owner"] or rec["site_addr"]:
+                            self._by_parcel[parcel] = rec
+                            log.info("Parcel enriched: %s -> %s", parcel, rec["site_addr"])
+                            return rec
             except Exception as e:
                 log.debug("GIS per-parcel lookup failed: %s", e)
 
