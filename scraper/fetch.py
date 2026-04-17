@@ -164,18 +164,9 @@ class SheriffScraper:
 
     # ------------------------------------------------------------------
     def _parse_html(self, html: str) -> list[dict]:
-        """
-        Parse sheriff sale results. Each property is a text blob in one cell.
-        Real format:
-          Attorney: NAME Appraised $X Case #: CVxxxxxx
-          Minimum Bid $X TYPE PLAINTIFF VS Sale Date M/D/YYYY
-          OWNER/NAME/ Status ... Parcel # Address Description
-          NNN-NN-NNN STREET_NUMBER STREET_NAME ...
-        """
         records = []
         soup = BeautifulSoup(html, "lxml")
 
-        # Collect all text blocks that contain a CV case number
         blocks = []
         for table in soup.find_all("table"):
             for row in table.find_all("tr"):
@@ -199,12 +190,6 @@ class SheriffScraper:
 
     # ------------------------------------------------------------------
     def _extract(self, text: str, row) -> Optional[dict]:
-        """
-        Extract fields using regex patterns matched to real Cuyahoga
-        sheriff sale text format.
-        """
-
-        # ── Case number ──────────────────────────────────────────────
         case_m = re.search(r'Case\s*#\s*:?\s*(CV\s*\d+)', text, re.I)
         if not case_m:
             case_m = re.search(r'\b(CV\d{4,})\b', text, re.I)
@@ -212,31 +197,19 @@ class SheriffScraper:
             return None
         case_num = case_m.group(1).replace(" ", "").upper()
 
-        # ── Attorney / Plaintiff ─────────────────────────────────────
-        # "Attorney: ELLEN FORNASH Appraised"
         att_m = re.search(r'Attorney\s*:\s*([A-Z][A-Z\s,\.]+?)(?=\s+Appraised|\s+Case\s*#|\s+\$)', text, re.I)
         plaintiff = att_m.group(1).strip().title() if att_m else ""
 
-        # ── Sale date ────────────────────────────────────────────────
-        # "VS Sale Date 1/12/2026"
         date_m = re.search(r'Sale\s+Date\s+(\d{1,2}/\d{1,2}/\d{4})', text, re.I)
         if not date_m:
             date_m = re.search(r'\b(\d{1,2}/\d{1,2}/\d{4})\b', text)
         sale_date = date_m.group(1) if date_m else ""
 
-        # Note: Sheriff sale listings show scheduled sale dates which may be
-        # months in the past or future. We keep all active listings.
-        # The filing/case date is what matters for our lookback window.
-        # Don't filter by sale_date here.
-
-        # ── Owner / Defendant ────────────────────────────────────────
-        # "VS Sale Date 1/12/2026 MITCHELL/RUTH/ Status"
         owner_m = re.search(
             r'VS\s+Sale\s+Date\s+\d{1,2}/\d{1,2}/\d{4}\s+([A-Z][A-Z/\s,\.\-]{2,60}?)\s+Status',
             text, re.I
         )
         if not owner_m:
-            # "VS MITCHELL/RUTH/ Status" without date in between
             owner_m = re.search(
                 r'\bVS\b\s+([A-Z][A-Z/\s,\.\-]{2,60}?)\s+Status',
                 text, re.I
@@ -247,28 +220,21 @@ class SheriffScraper:
             parts = [p.strip() for p in re.split(r'[/,]', raw) if p.strip()]
             owner = " ".join(p.title() for p in parts)
 
-        # ── Parcel number ─────────────────────────────────────────────
-        # "703-01-013"
         parcel_m = re.search(r'\b(\d{3}-\d{2}-\d{3})\b', text)
         parcel = parcel_m.group(1) if parcel_m else ""
 
-        # ── Property address ──────────────────────────────────────────
-        # "703-01-013 1395 SOUTH BELVOIR BOULEVARD"
         prop_address = ""
         if parcel:
-            # Address comes right after parcel number
             addr_m = re.search(
                 re.escape(parcel) + r'\s+(\d{1,5}\s+[A-Z][A-Z0-9\s]{3,50})',
                 text, re.I
             )
             if addr_m:
-                # Trim at "A SINGLE" or "DWELLING" or similar description words
                 addr_raw = addr_m.group(1)
                 addr_raw = re.sub(r'\s+(A\s+SINGLE|DWELLING|COMMERCIAL|VACANT|LOT|WITH\s+).*$', '', addr_raw, flags=re.I)
                 prop_address = addr_raw.strip().title()
 
         if not prop_address:
-            # Fallback: find any street address pattern
             addr_m = re.search(
                 r'\b(\d{3,5}\s+[A-Z][A-Z\s]{3,40}'
                 r'(?:STREET|ST|AVENUE|AVE|DRIVE|DR|ROAD|RD|BOULEVARD|BLVD|'
@@ -278,18 +244,14 @@ class SheriffScraper:
             if addr_m:
                 prop_address = addr_m.group(1).strip().title()
 
-        # ── Zip code ──────────────────────────────────────────────────
         zip_m = re.search(r'\b(44\d{3})\b', text)
         prop_zip = zip_m.group(1) if zip_m else ""
 
-        # ── Amount ───────────────────────────────────────────────────
-        # "Appraised $120,000.00"
         amt_m = re.search(r'Appraised\s+\$?([\d,]+(?:\.\d{2})?)', text, re.I)
         if not amt_m:
             amt_m = re.search(r'Minimum\s+Bid\s+\$?([\d,]+)', text, re.I)
         amount = parse_amount(amt_m.group(1)) if amt_m else None
 
-        # ── Link ─────────────────────────────────────────────────────
         link_tag = row.find("a", href=True)
         href = link_tag["href"] if link_tag else ""
         if href and not href.startswith("http"):
@@ -387,12 +349,9 @@ class ParcelLookup:
 
     # CAMA parcel service with tax/assessment data — try new geospatial hub first
     CAMA_URLS = [
-        # New CuyahogaGIS Hub (replacing old opendata site)
         "https://geospatial.gis.cuyahogacounty.gov/server/rest/services/Parcels/FeatureServer/0/query",
         "https://geospatial.gis.cuyahogacounty.gov/server/rest/services/CCFO/TaxParcels_WGS84/FeatureServer/0/query",
-        # MyPlace service
         "https://gis.cuyahogacounty.us/server/rest/services/MyPLACE/Parcels_WMA_GJOIN_WGS84/MapServer/0/query",
-        # Old opendata (deprecated but may still work)
         "https://data-cuyahoga.opendata.arcgis.com/datasets/ffaaa1651d5540419469375d680f3245_0/query",
     ]
 
@@ -408,9 +367,7 @@ class ParcelLookup:
         self._session.verify = False
         self._session.headers.update({"User-Agent": "CuyahogaLeadScraper/1.0"})
 
-        # Test each GIS URL but don't do bulk load yet
-        # (bulk load returns empty from deprecated endpoints)
-        # Instead we do per-parcel lookups during enrichment
+        # Test each GIS URL to find one that works
         for url in self.CAMA_URLS:
             try:
                 r = self._session.get(url, params={
@@ -424,31 +381,17 @@ class ParcelLookup:
                     data = r.json()
                     if data.get("features"):
                         self._working_url = url
-                        log.info("Parcel per-parcel URL: %s", url)
+                        log.info("Parcel API working: %s", url)
                         break
             except Exception:
                 continue
 
-        # Test MyPlace URL
-        try:
-            r = self._session.get(self.MYPLACE_URL, params={
-                "where": "PARCELNO='703-01-013'",
-                "outFields": "OWNER,PARCELNO",
-                "f": "json",
-                "resultRecordCount": 1,
-                "returnGeometry": "false"
-            }, timeout=15)
-            if r.status_code == 200 and r.json().get("features"):
-                if not self._working_url:
-                    self._working_url = "https://gis.cuyahogacounty.us/server/rest/services/MyPLACE/Parcels_WMA_GJOIN_WGS84/MapServer/0/query"
-                log.info("MyPlace per-parcel URL working")
-        except Exception:
-            pass
-
+        # If none of the CAMA URLs worked, always fall back to MyPlace URL directly
         if not self._working_url:
-            log.info("Will use per-parcel lookups via: %s", self._working_url)
+            self._working_url = self.MYPLACE_URL
+            log.info("Using MyPlace URL as fallback: %s", self._working_url)
         else:
-            log.warning("No parcel API working — will use MyPlace web scrape")
+            log.info("Will use per-parcel lookups via: %s", self._working_url)
 
     def enrich_records(self, records: list) -> int:
         """Enrich records with parcel data. Returns count enriched."""
@@ -479,43 +422,6 @@ class ParcelLookup:
             time.sleep(0.3)  # be polite to the API
         return enriched
 
-    def _load_bulk(self) -> int:
-        """Load bulk parcel data into memory indexes."""
-        offset, size, total = 0, 1000, 0
-        fields = ("OWNER,OWN1,SITEADDR,SITE_ADDR,SITESTREET,SITE_CITY,SITE_ZIP,"
-                  "MAILADR1,ADDR_1,MAILCITY,CITY,STATE,MAILZIP,ZIP,"
-                  "PARCELNO,PARID,APN,"
-                  "DELINQUENT,DELINQ,DELINQ_AMT,BACK_TAX,"
-                  "HOMESTEAD,HMSTD,HOMESTEAD_EXM,"
-                  "APPVAL,APPRVAL,ASSESSED,LAND_VALUE,BLDG_VALUE,"
-                  "OWNER_OCC,OUTOFSTATE,OUT_OF_STATE")
-        try:
-            while True:
-                params = {
-                    "where":             "1=1",
-                    "outFields":         fields,
-                    "f":                 "json",
-                    "resultOffset":      offset,
-                    "resultRecordCount": size,
-                    "returnGeometry":    "false",
-                }
-                r = self._session.get(self._working_url, params=params, timeout=60)
-                r.raise_for_status()
-                features = r.json().get("features", [])
-                if not features:
-                    break
-                for feat in features:
-                    self._ingest(feat.get("attributes", {}))
-                    total += 1
-                if len(features) < size:
-                    break
-                offset += size
-                time.sleep(0.2)
-        except Exception as e:
-            log.warning("Bulk load error: %s", e)
-        log.info("Parcels loaded: %d", total)
-        return total
-
     def _ingest(self, r: dict):
         def g(*keys):
             for k in keys:
@@ -541,7 +447,6 @@ class ParcelLookup:
             "mail_state":  g("STATE") or "OH",
             "mail_zip":    g("MAILZIP", "ZIP"),
             "parcel":      parcel,
-            # Enrichment fields
             "delinquent":  g("DELINQUENT", "DELINQ", "BACK_TAX") not in ("", "N", "0", "No"),
             "delinq_amt":  g("DELINQ_AMT"),
             "homestead":   g("HOMESTEAD", "HMSTD", "HOMESTEAD_EXM") not in ("", "N", "0", "No"),
@@ -558,23 +463,19 @@ class ParcelLookup:
             self._by_address[normalize_name(site)] = rec
 
     def lookup_parcel(self, parcel_num: str) -> Optional[dict]:
-        """Look up by parcel number — most reliable."""
         if not parcel_num:
             return None
         clean = parcel_num.strip()
         hit = self._by_parcel.get(clean)
         if hit:
             return hit
-        # Try without dashes
         nodash = clean.replace("-", "")
         for k, v in self._by_parcel.items():
             if k.replace("-", "") == nodash:
                 return v
-        # Try per-API lookup if not in bulk data
         return self._api_lookup_parcel(clean)
 
     def lookup_owner(self, name: str) -> Optional[dict]:
-        """Look up by owner name."""
         if not name:
             return None
         for v in name_variants(name):
@@ -584,32 +485,30 @@ class ParcelLookup:
         return None
 
     def lookup_address(self, address: str) -> Optional[dict]:
-        """Look up by property address."""
         if not address:
             return None
         norm = normalize_name(address)
         hit = self._by_address.get(norm)
         if hit:
             return hit
-        # Try partial match
         for k, v in self._by_address.items():
             if norm in k or k in norm:
                 return v
         return None
 
     def lookup(self, name: str) -> Optional[dict]:
-        """Convenience method — look up by owner name."""
         return self.lookup_owner(name)
 
     def _api_lookup_parcel(self, parcel: str) -> Optional[dict]:
-        """Per-parcel API lookup using MyPlace web scrape as fallback."""
+        """Per-parcel API lookup using GIS API, with MyPlace web scrape as fallback."""
         if not self._session:
             return None
 
-        # Try GIS API first
-        if not self._working_url:
+        # Try GIS API first (FIX: was "if not self._working_url" — should be "if self._working_url")
+        if self._working_url:
             try:
                 clean = parcel.replace("-","")
+                log.info("Parcel API lookup: %s via %s", parcel, self._working_url)
                 r = self._session.get(self._working_url, params={
                     "where":          f"UPPER(REPLACE(PARCELNO,'-',''))='{clean}' OR UPPER(REPLACE(PARID,'-',''))='{clean}'",
                     "outFields":      "*",
@@ -629,6 +528,7 @@ class ParcelLookup:
 
         # Fallback: scrape MyPlace web page
         try:
+            log.info("Trying MyPlace web scrape for parcel: %s", parcel)
             url = f"https://myplace.cuyahogacounty.gov/en-US/REPI.aspx?parcelid={parcel}"
             r = self._session.get(url, timeout=15)
             if r.status_code == 200:
@@ -643,7 +543,6 @@ class ParcelLookup:
         return None
 
     def _parse_myplace_html(self, soup, parcel: str) -> Optional[dict]:
-        """Parse MyPlace property detail page."""
         text = soup.get_text(" ", strip=True)
 
         def find_after(label: str, text: str, chars: int = 80) -> str:
