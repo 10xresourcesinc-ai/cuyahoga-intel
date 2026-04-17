@@ -440,7 +440,7 @@ class ParcelLookup:
             }, timeout=15)
             if r.status_code == 200 and r.json().get("features"):
                 if not self._working_url:
-                    self._working_url = self.MYPLACE_URL
+                    self._working_url = "https://gis.cuyahogacounty.us/server/rest/services/MyPLACE/Parcels_WMA_GJOIN_WGS84/MapServer/0/query"
                 log.info("MyPlace per-parcel URL working")
         except Exception:
             pass
