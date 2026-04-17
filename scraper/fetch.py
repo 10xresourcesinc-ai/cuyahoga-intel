@@ -500,59 +500,42 @@ class ParcelLookup:
         if not self._session:
             return None
 
-        # Try GIS API using correct field name: parcelpin (no dashes)
-        if self._working_url:
-            try:
-                clean = parcel.replace("-","")
-                log.info("Parcel API lookup: %s via %s", parcel, self._working_url)
-                r = self._session.get(self._working_url, params={
-                    "where":          f"parcelpin='{clean}'",
-                    "outFields":      "parcelpin,parcel_owner,deeded_owner,par_addr_all,par_city,par_zip,mail_name,mail_addr_street,mail_city,mail_state,mail_zip,certified_tax_total,gross_certified_total",
-                    "f":              "json",
-                    "resultRecordCount": 1,
-                    "returnGeometry": "false",
-                }, timeout=15)
-                if r.status_code == 200:
-                    features = r.json().get("features", [])
-                    if features:
-                        attrs = features[0].get("attributes", {})
-                        # Map API fields to our internal format
-                        rec = {
-                            "owner":       normalize_name(attrs.get("parcel_owner") or attrs.get("deeded_owner") or ""),
-                            "site_addr":   attrs.get("par_addr_all") or "",
-                            "site_city":   attrs.get("par_city") or "Cleveland",
-                            "site_zip":    str(int(attrs["par_zip"])) if attrs.get("par_zip") else "",
-                            "mail_addr":   attrs.get("mail_addr_street") or "",
-                            "mail_city":   attrs.get("mail_city") or "",
-                            "mail_state":  attrs.get("mail_state") or "OH",
-                            "mail_zip":    attrs.get("mail_zip") or "",
-                            "parcel":      parcel,
-                            "delinquent":  False,
-                            "delinq_amt":  "",
-                            "homestead":   False,
-                            "appraised":   str(attrs.get("certified_tax_total") or attrs.get("gross_certified_total") or ""),
-                            "out_of_state": (attrs.get("mail_state") or "OH").upper() not in ("OH", ""),
-                        }
-                        if rec["owner"] or rec["site_addr"]:
-                            self._by_parcel[parcel] = rec
-                            log.info("Parcel enriched: %s -> %s", parcel, rec["site_addr"])
-                            return rec
-            except Exception as e:
-                log.debug("GIS per-parcel lookup failed: %s", e)
-
-        # Fallback: scrape MyPlace web page
+        # Use MyPlace WCF service — parcel number WITH dashes
         try:
-            log.info("Trying MyPlace web scrape for parcel: %s", parcel)
-            url = f"https://myplace.cuyahogacounty.gov/en-US/REPI.aspx?parcelid={parcel}"
+            log.info("Parcel API lookup: %s", parcel)
+            url = f"https://myplace.cuyahogacounty.gov/MyPlaceService.svc/ParcelsAndValuesByAnySearchByAndCity/{parcel}?city=99&searchBy=Parcel"
             r = self._session.get(url, timeout=15)
             if r.status_code == 200:
-                soup = BeautifulSoup(r.text, "lxml")
-                rec = self._parse_myplace_html(soup, parcel)
-                if rec:
-                    self._by_parcel[parcel] = rec
-                    return rec
+                import json as _json
+                data = _json.loads(r.json())
+                if data and data[0]:
+                    attrs = data[0][0]
+                    owner = normalize_name(attrs.get("DEEDED_OWNER") or "")
+                    site_addr = (attrs.get("PHYSICAL_ADDRESS") or "").strip().title()
+                    city = (attrs.get("PARCEL_CITY") or "Cleveland").strip().title()
+                    zipcode = str(attrs.get("PARCEL_ZIP") or "")
+                    rec = {
+                        "owner":       owner,
+                        "site_addr":   site_addr,
+                        "site_city":   city,
+                        "site_zip":    zipcode,
+                        "mail_addr":   "",
+                        "mail_city":   "",
+                        "mail_state":  "OH",
+                        "mail_zip":    "",
+                        "parcel":      parcel,
+                        "delinquent":  False,
+                        "delinq_amt":  "",
+                        "homestead":   False,
+                        "appraised":   str(attrs.get("CERTIFIED_TAX_TOTAL") or ""),
+                        "out_of_state": False,
+                    }
+                    if owner or site_addr:
+                        self._by_parcel[parcel] = rec
+                        log.info("Parcel enriched: %s -> %s, %s", parcel, site_addr, city)
+                        return rec
         except Exception as e:
-            log.debug("MyPlace web lookup failed: %s", e)
+            log.debug("MyPlace WCF lookup failed: %s", e)
 
         return None
 
