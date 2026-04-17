@@ -445,7 +445,7 @@ class ParcelLookup:
         except Exception:
             pass
 
-        if self._working_url:
+        if not self._working_url:
             log.info("Will use per-parcel lookups via: %s", self._working_url)
         else:
             log.warning("No parcel API working — will use MyPlace web scrape")
@@ -607,7 +607,7 @@ class ParcelLookup:
             return None
 
         # Try GIS API first
-        if self._working_url:
+        if not self._working_url:
             try:
                 clean = parcel.replace("-","")
                 r = self._session.get(self._working_url, params={
