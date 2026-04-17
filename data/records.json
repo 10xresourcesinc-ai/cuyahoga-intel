@@ -1,5 +1,5 @@
 {
-  "fetched_at": "2026-04-17T20:10:57.773444+00:00",
+  "fetched_at": "2026-04-17T20:40:58.551272+00:00",
   "source": "Cuyahoga County Court Docket + Manual Uploads",
   "date_range": {
     "from": "04/10/2026",
@@ -136,7 +136,7 @@
       "grantee": "Carrie Davis",
       "amount": 205000.0,
       "legal": "731-15-044",
-      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl10$lnkCaseNum','')",
+      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl09$lnkCaseNum','')",
       "prop_address": "3055  Ludlow Road",
       "prop_city": "Cleveland",
       "prop_state": "OH",
@@ -242,7 +242,7 @@
       "grantee": "Appraised",
       "amount": 0.0,
       "legal": "763-18-470",
-      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl09$lnkCaseNum','')",
+      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl10$lnkCaseNum','')",
       "prop_address": "4958  Caroline Dr",
       "prop_city": "Cleveland",
       "prop_state": "OH",
