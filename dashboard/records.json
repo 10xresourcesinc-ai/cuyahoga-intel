@@ -1,5 +1,5 @@
 {
-  "fetched_at": "2026-04-17T19:48:01.510290+00:00",
+  "fetched_at": "2026-04-17T20:10:57.773444+00:00",
   "source": "Cuyahoga County Court Docket + Manual Uploads",
   "date_range": {
     "from": "04/10/2026",
@@ -36,6 +36,38 @@
       ]
     },
     {
+      "doc_num": "CV21951714",
+      "doc_type": "NOFC",
+      "cat": "NOFC",
+      "cat_label": "Notice of Foreclosure",
+      "filed": "12/15/2025",
+      "owner": "Shefton Khrystalynn",
+      "grantee": "Jason Ramsey",
+      "amount": 100000.0,
+      "legal": "812-35-355",
+      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl03$lnkCaseNum','')",
+      "prop_address": "554  Turney Road One Unit In A Frame Condominium",
+      "prop_city": "Cleveland",
+      "prop_state": "OH",
+      "prop_zip": "",
+      "mail_address": "554 TURNEY RD",
+      "mail_city": "BEDFORD",
+      "mail_state": "OH",
+      "mail_zip": "44146",
+      "source": "Court Docket",
+      "delinquent": false,
+      "delinq_amt": "",
+      "homestead": false,
+      "appraised": "84800.0",
+      "out_of_state": false,
+      "score": 60,
+      "flags": [
+        "Pre-foreclosure",
+        "Address found",
+        "No homestead exemption"
+      ]
+    },
+    {
       "doc_num": "CV19913692",
       "doc_type": "NOFC",
       "cat": "NOFC",
@@ -60,6 +92,38 @@
         "Pre-foreclosure",
         "High debt (>$100k)",
         "Address found"
+      ]
+    },
+    {
+      "doc_num": "CV14834135",
+      "doc_type": "NOFC",
+      "cat": "NOFC",
+      "cat_label": "Notice of Foreclosure",
+      "filed": "11/24/2025",
+      "owner": "Green June S.",
+      "grantee": "Jason Ramsey",
+      "amount": 65000.0,
+      "legal": "736-11-314",
+      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl06$lnkCaseNum','')",
+      "prop_address": "3271  Warrensville Center Road One Unit In A Brick Condom",
+      "prop_city": "Cleveland",
+      "prop_state": "OH",
+      "prop_zip": "",
+      "mail_address": "4574 WARRENSVILLE CENTER RD",
+      "mail_city": "NORTH RANDALL",
+      "mail_state": "OH",
+      "mail_zip": "44128",
+      "source": "Court Docket",
+      "delinquent": false,
+      "delinq_amt": "",
+      "homestead": false,
+      "appraised": "47300.0",
+      "out_of_state": false,
+      "score": 60,
+      "flags": [
+        "Pre-foreclosure",
+        "Address found",
+        "No homestead exemption"
       ]
     },
     {
@@ -99,7 +163,7 @@
       "grantee": "Ted Humbert",
       "amount": 375000.0,
       "legal": "263-17-013",
-      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl12$lnkCaseNum','')",
+      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl11$lnkCaseNum','')",
       "prop_address": "8998  Usher Road",
       "prop_city": "Cleveland",
       "prop_state": "OH",
@@ -113,32 +177,6 @@
       "flags": [
         "Pre-foreclosure",
         "High debt (>$100k)",
-        "Address found"
-      ]
-    },
-    {
-      "doc_num": "CV21951714",
-      "doc_type": "NOFC",
-      "cat": "NOFC",
-      "cat_label": "Notice of Foreclosure",
-      "filed": "12/15/2025",
-      "owner": "Shefton Khrystalynn",
-      "grantee": "Jason Ramsey",
-      "amount": 100000.0,
-      "legal": "812-35-355",
-      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl03$lnkCaseNum','')",
-      "prop_address": "554  Turney Road One Unit In A Frame Condominium",
-      "prop_city": "Cleveland",
-      "prop_state": "OH",
-      "prop_zip": "",
-      "mail_address": "",
-      "mail_city": "",
-      "mail_state": "OH",
-      "mail_zip": "",
-      "source": "Court Docket",
-      "score": 55,
-      "flags": [
-        "Pre-foreclosure",
         "Address found"
       ]
     },
@@ -169,32 +207,6 @@
       ]
     },
     {
-      "doc_num": "CV14834135",
-      "doc_type": "NOFC",
-      "cat": "NOFC",
-      "cat_label": "Notice of Foreclosure",
-      "filed": "11/24/2025",
-      "owner": "Green June S.",
-      "grantee": "Jason Ramsey",
-      "amount": 65000.0,
-      "legal": "736-11-314",
-      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl06$lnkCaseNum','')",
-      "prop_address": "3271  Warrensville Center Road One Unit In A Brick Condom",
-      "prop_city": "Cleveland",
-      "prop_state": "OH",
-      "prop_zip": "",
-      "mail_address": "",
-      "mail_city": "",
-      "mail_state": "OH",
-      "mail_zip": "",
-      "source": "Court Docket",
-      "score": 55,
-      "flags": [
-        "Pre-foreclosure",
-        "Address found"
-      ]
-    },
-    {
       "doc_num": "CV19920641",
       "doc_type": "NOFC",
       "cat": "NOFC",
@@ -204,7 +216,7 @@
       "grantee": "",
       "amount": 189082.0,
       "legal": "",
-      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl09$lnkCaseNum','')",
+      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl08$lnkCaseNum','')",
       "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
@@ -218,6 +230,39 @@
       "flags": [
         "Pre-foreclosure",
         "High debt (>$100k)"
+      ]
+    },
+    {
+      "doc_num": "CV21944569",
+      "doc_type": "NOFC",
+      "cat": "NOFC",
+      "cat_label": "Notice of Foreclosure",
+      "filed": "1/14/2026",
+      "owner": "J.M. Capital Ltd",
+      "grantee": "Appraised",
+      "amount": 0.0,
+      "legal": "763-18-470",
+      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl09$lnkCaseNum','')",
+      "prop_address": "4958  Caroline Dr",
+      "prop_city": "Cleveland",
+      "prop_state": "OH",
+      "prop_zip": "",
+      "mail_address": "6337 ELDRIDGE BLVD",
+      "mail_city": "BEDFORD HTS",
+      "mail_state": "OH",
+      "mail_zip": "44146",
+      "source": "Court Docket",
+      "delinquent": false,
+      "delinq_amt": "",
+      "homestead": false,
+      "appraised": "200.0",
+      "out_of_state": false,
+      "score": 55,
+      "flags": [
+        "Pre-foreclosure",
+        "Address found",
+        "LLC / corp owner",
+        "No homestead exemption"
       ]
     },
     {
@@ -247,33 +292,6 @@
       ]
     },
     {
-      "doc_num": "CV21944569",
-      "doc_type": "NOFC",
-      "cat": "NOFC",
-      "cat_label": "Notice of Foreclosure",
-      "filed": "1/14/2026",
-      "owner": "J.M. Capital Ltd",
-      "grantee": "Appraised",
-      "amount": 0.0,
-      "legal": "763-18-470",
-      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl08$lnkCaseNum','')",
-      "prop_address": "4958  Caroline Dr",
-      "prop_city": "Cleveland",
-      "prop_state": "OH",
-      "prop_zip": "",
-      "mail_address": "",
-      "mail_city": "",
-      "mail_state": "OH",
-      "mail_zip": "",
-      "source": "Court Docket",
-      "score": 50,
-      "flags": [
-        "Pre-foreclosure",
-        "Address found",
-        "LLC / corp owner"
-      ]
-    },
-    {
       "doc_num": "CV19920256",
       "doc_type": "NOFC",
       "cat": "NOFC",
@@ -283,7 +301,7 @@
       "grantee": "",
       "amount": 77749.0,
       "legal": "",
-      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl11$lnkCaseNum','')",
+      "clerk_url": "https://cpdocket.cp.cuyahogacounty.gov/javascript:__doPostBack('ctl00$SheetContentPlaceHolder$C_searchresults$gvSaleSummary$ctl12$lnkCaseNum','')",
       "prop_address": "",
       "prop_city": "Cleveland",
       "prop_state": "OH",
