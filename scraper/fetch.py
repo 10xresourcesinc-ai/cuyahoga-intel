@@ -49,6 +49,7 @@ RETRY            = 3
 CLEVELAND_ORG     = "https://services3.arcgis.com/dty2kHktVXHrqO8i/ArcGIS/rest/services"
 VIOLATIONS_URL    = f"{CLEVELAND_ORG}/Complaint_Violation_Notices/FeatureServer/0/query"
 CONDEMNATIONS_URL = f"{CLEVELAND_ORG}/Current_Condemnations/FeatureServer/0/query"
+VIOLATIONS_META   = f"{CLEVELAND_ORG}/Complaint_Violation_Notices/FeatureServer/0"
 
 
 # ===========================================================================
@@ -335,55 +336,162 @@ class SheriffScraper:
 
 # ===========================================================================
 # Code Violation Scraper — Cleveland Open Data
+# PHASE 3 UPDATE: schema discovery + violation type classification
 # ===========================================================================
 
+# Violation description keyword → (cat subtype, human label)
+VIOL_TYPE_MAP = {
+    "TALL GRASS":      ("CODE_GRASS",   "Tall Grass / Weeds"),
+    "WEED":            ("CODE_GRASS",   "Tall Grass / Weeds"),
+    "OVERGROWN":       ("CODE_GRASS",   "Tall Grass / Weeds"),
+    "VEGETATION":      ("CODE_GRASS",   "Tall Grass / Weeds"),
+    "GARBAGE":         ("CODE_DEBRIS",  "Garbage / Debris"),
+    "DEBRIS":          ("CODE_DEBRIS",  "Garbage / Debris"),
+    "DUMP":            ("CODE_DEBRIS",  "Garbage / Debris"),
+    "TRASH":           ("CODE_DEBRIS",  "Garbage / Debris"),
+    "LITTER":          ("CODE_DEBRIS",  "Garbage / Debris"),
+    "JUNK":            ("CODE_DEBRIS",  "Garbage / Debris"),
+    "STRUCTURAL":      ("CODE_STRUCT",  "Structural Issue"),
+    "EXTERIOR":        ("CODE_STRUCT",  "Structural Issue"),
+    "FOUNDATION":      ("CODE_STRUCT",  "Structural Issue"),
+    "ROOF":            ("CODE_STRUCT",  "Structural Issue"),
+    "WALL":            ("CODE_STRUCT",  "Structural Issue"),
+    "WINDOW":          ("CODE_STRUCT",  "Structural Issue"),
+    "DOOR":            ("CODE_STRUCT",  "Structural Issue"),
+    "VACANT":          ("CODE_STRUCT",  "Vacant / Unsecured"),
+    "UNSECURED":       ("CODE_STRUCT",  "Vacant / Unsecured"),
+    "OPEN AND VACANT": ("CODE_STRUCT",  "Vacant / Unsecured"),
+    "NUISANCE":        ("CODE_NUISANCE","Property Nuisance"),
+    "INOPERABLE":      ("CODE_NUISANCE","Inoperable Vehicle"),
+    "VEHICLE":         ("CODE_NUISANCE","Inoperable Vehicle"),
+    "ELECTRICAL":      ("CODE_MECH",    "Electrical Issue"),
+    "PLUMBING":        ("CODE_MECH",    "Plumbing Issue"),
+    "MECHANICAL":      ("CODE_MECH",    "Mechanical Issue"),
+    "HVAC":            ("CODE_MECH",    "Mechanical Issue"),
+    "RODENT":          ("CODE_PEST",    "Rodent / Pest"),
+    "PEST":            ("CODE_PEST",    "Rodent / Pest"),
+    "RAT":             ("CODE_PEST",    "Rodent / Pest"),
+    "INSECT":          ("CODE_PEST",    "Rodent / Pest"),
+}
+
+def classify_violation(description: str) -> tuple:
+    upper = (description or "").upper()
+    for keyword, (cat, label) in VIOL_TYPE_MAP.items():
+        if keyword in upper:
+            return cat, label
+    return "CODE", "Code Violation"
+
+
 class CodeViolationScraper:
-    """
-    Pulls Cleveland Building & Housing code violations and active condemnations
-    from the City of Cleveland Open Data ArcGIS API.
-    """
 
     def __init__(self):
         self.session = requests.Session()
         self.session.verify = False
         self.session.headers.update({"User-Agent": "CuyahogaLeadScraper/1.0"})
         self.raw_records: list[dict] = []
+        self._date_field:   Optional[str] = None
+        self._type_field:   Optional[str] = None
+        self._avail_fields: list[str]     = []
 
     def run(self):
         log.info("Scraping Cleveland code violations ...")
+        self._discover_schema()
         self._scrape_violations()
         self._scrape_condemnations()
         log.info("Code violations + condemnations: %d records", len(self.raw_records))
 
-    def _scrape_violations(self):
-        """Pull recent complaint violation notices within lookback window."""
+    def _discover_schema(self):
+        """Read field names from ArcGIS layer metadata so our queries use the right names."""
         try:
-            cutoff_ms = int((datetime.now() - timedelta(days=LOOKBACK_DAYS)).timestamp() * 1000)
-            params = {
-                "where":             f"FILE_DATE >= {cutoff_ms}",
-                "outFields":         "RECORD_ID,FILE_DATE,PARCEL_NUMBER,PRIMARY_ADDRESS,"
-                                     "VIOLATION_NUMBER,VIOLATION_APP_STATUS,DW_Neighborhood,"
-                                     "VIOLATION_ACCELA_CITIZEN_ACCESS_URL",
-                "f":                 "json",
-                "resultRecordCount": 2000,
-                "returnGeometry":    "false",
-                "orderByFields":     "FILE_DATE DESC",
-            }
-            r = self.session.get(VIOLATIONS_URL, params=params, timeout=30)
+            r = self.session.get(VIOLATIONS_META, params={"f": "json"}, timeout=15)
             r.raise_for_status()
-            features = r.json().get("features", [])
-            log.info("Code violations fetched: %d records", len(features))
+            fields = r.json().get("fields", [])
+            self._avail_fields = [f["name"] for f in fields]
+            log.info("ArcGIS violation layer fields: %s", self._avail_fields)
 
-            for feat in features:
-                rec = self._violation_to_record(feat.get("attributes", {}))
-                if rec:
-                    self.raw_records.append(rec)
+            for candidate in ["FILE_DATE","COMPLAINT_DATE","DATE_FILED","OPEN_DATE","CREATEDATE"]:
+                if candidate in self._avail_fields:
+                    self._date_field = candidate
+                    log.info("Using date field: %s", self._date_field)
+                    break
+
+            for candidate in ["COMPLAINT_TYPE","VIOLATION_TYPE","VIOLATION_DESC",
+                               "DESCRIPTION","RECORD_TYPE","TYPE_DESC","CASE_TYPE",
+                               "COMPLAINT_DESC","WORK_DESCRIPTION","NOTICE_TYPE"]:
+                if candidate in self._avail_fields:
+                    self._type_field = candidate
+                    log.info("Using violation type field: %s", self._type_field)
+                    break
 
         except Exception as e:
-            log.warning("Code violation scrape failed: %s", e)
+            log.warning("Schema discovery failed: %s — using defaults", e)
+
+        if not self._date_field:
+            self._date_field = "FILE_DATE"
+        if not self._type_field:
+            self._type_field = "COMPLAINT_TYPE"
+
+    def _scrape_violations(self):
+        cutoff_dt   = datetime.now() - timedelta(days=LOOKBACK_DAYS)
+        cutoff_ms   = int(cutoff_dt.timestamp() * 1000)
+        # FILE_DATE has precision:1 meaning it may store as days-since-epoch * 86400000
+        # OR as a standard esriFieldTypeDate in ms. We try both plus SQL fallback.
+        cutoff_days = int(cutoff_dt.timestamp() / 86400)   # days since Unix epoch
+        cutoff_sql  = cutoff_dt.strftime("%Y-%m-%d")
+
+        # Only request fields that actually exist in this layer (no type/description field)
+        desired = [
+            "RECORD_ID", "VIOLATION_NUMBER", "FILE_DATE",
+            "PARCEL_NUMBER", "PRIMARY_ADDRESS",
+            "VIOLATION_APP_STATUS",
+            "DW_Neighborhood",
+            "COMPLAINT_ACCELA_CITIZEN_ACCESS_URL",
+            "VIOLATION_ACCELA_CITIZEN_ACCESS_URL",
+        ]
+
+        features = []
+        for where_clause in [
+            f"FILE_DATE >= {cutoff_ms}",                    # standard ms epoch
+            f"FILE_DATE >= {cutoff_days}",                  # days epoch (precision:1)
+            f"FILE_DATE >= DATE '{cutoff_sql}'",            # SQL date string
+            f"FILE_DATE >= '{cutoff_sql}'",                 # plain string date
+            "1=1",                                          # last resort: everything
+        ]:
+            try:
+                params = {
+                    "where":             where_clause,
+                    "outFields":         ",".join(desired),
+                    "f":                 "json",
+                    "resultRecordCount": 2000,
+                    "returnGeometry":    "false",
+                    "orderByFields":     f"{self._date_field} DESC",
+                }
+                r = self.session.get(VIOLATIONS_URL, params=params, timeout=30)
+                r.raise_for_status()
+                data = r.json()
+
+                if "error" in data:
+                    log.warning("ArcGIS error with where='%s': %s", where_clause, data["error"])
+                    continue
+
+                features = data.get("features", [])
+                log.info("WHERE '%s' → %d features", where_clause, len(features))
+
+                if features:
+                    log.info("SAMPLE violation record: %s", features[0].get("attributes", {}))
+                    break
+
+            except Exception as e:
+                log.warning("Violation query failed (where='%s'): %s", where_clause, e)
+                continue
+
+        log.info("Code violations fetched: %d records", len(features))
+        for feat in features:
+            rec = self._violation_to_record(feat.get("attributes", {}))
+            if rec:
+                self.raw_records.append(rec)
 
     def _scrape_condemnations(self):
-        """Pull all currently condemned properties."""
         try:
             params = {
                 "where":             "Active_Condemnation='Yes'",
@@ -397,12 +505,10 @@ class CodeViolationScraper:
             r.raise_for_status()
             features = r.json().get("features", [])
             log.info("Condemnations fetched: %d records", len(features))
-
             for feat in features:
                 rec = self._condemnation_to_record(feat.get("attributes", {}))
                 if rec:
                     self.raw_records.append(rec)
-
         except Exception as e:
             log.warning("Condemnation scrape failed: %s", e)
 
@@ -412,13 +518,23 @@ class CodeViolationScraper:
         rec_id  = attrs.get("RECORD_ID") or attrs.get("VIOLATION_NUMBER") or ""
         status  = attrs.get("VIOLATION_APP_STATUS") or ""
         nbhd    = attrs.get("DW_Neighborhood") or ""
-        url     = attrs.get("VIOLATION_ACCELA_CITIZEN_ACCESS_URL") or ""
+        url     = (attrs.get("VIOLATION_ACCELA_CITIZEN_ACCESS_URL")
+                   or attrs.get("COMPLAINT_ACCELA_CITIZEN_ACCESS_URL") or "")
 
+        # This layer has no violation type/description field — label generically
+        viol_desc = ""
+        cat, cat_label = "CODE", "Code Violation"
+
+        # FILE_DATE: try ms epoch first, then days epoch (precision:1), then raw
         filed = ""
-        ms = attrs.get("FILE_DATE")
-        if ms:
+        raw_date = attrs.get("FILE_DATE")
+        if raw_date:
             try:
-                filed = datetime.fromtimestamp(ms / 1000).strftime("%m/%d/%Y")
+                val = int(raw_date)
+                if val > 1_000_000_000_000:          # looks like ms epoch
+                    filed = datetime.fromtimestamp(val / 1000).strftime("%m/%d/%Y")
+                elif val > 10_000:                    # looks like days epoch
+                    filed = datetime.fromtimestamp(val * 86400).strftime("%m/%d/%Y")
             except Exception:
                 pass
 
@@ -430,9 +546,9 @@ class CodeViolationScraper:
 
         return {
             "doc_num":      rec_id,
-            "doc_type":     "CODE",
+            "doc_type":     cat,
             "cat":          "CODE",
-            "cat_label":    "Code Violation",
+            "cat_label":    cat_label,
             "filed":        filed,
             "owner":        "",
             "grantee":      "",
@@ -450,6 +566,7 @@ class CodeViolationScraper:
             "source":       "Cleveland Code Enforcement",
             "neighborhood": nbhd,
             "viol_status":  status,
+            "viol_desc":    viol_desc,
         }
 
     def _condemnation_to_record(self, attrs: dict) -> Optional[dict]:
@@ -468,7 +585,6 @@ class CodeViolationScraper:
         if not address and not parcel:
             return None
 
-        # Address format: "2965 E 79 St, Cleveland, Oh, 44104"
         prop_addr_clean = address
         prop_city = "Cleveland"
         if "," in address:
@@ -502,6 +618,7 @@ class CodeViolationScraper:
             "source":       "Cleveland Code Enforcement",
             "neighborhood": nbhd,
             "viol_status":  "Condemned",
+            "viol_desc":    "",
         }
 
 
@@ -692,6 +809,7 @@ GHL_COLS = [
     "Seller Score","Motivated Seller Flags","Source","Public Records URL",
     "Parcel Number","Appraised Value","Delinquent Taxes","Delinquent Amount",
     "Homestead Exemption","Out-of-State Owner","Neighborhood","Violation Status",
+    "Violation Description",
 ]
 
 def split_name(n):
@@ -737,6 +855,7 @@ def export_csv(records: list, path: Path):
                 "Out-of-State Owner": "Yes" if r.get("out_of_state") else "No",
                 "Neighborhood":      r.get("neighborhood", ""),
                 "Violation Status":  r.get("viol_status", ""),
+                "Violation Description": r.get("viol_desc", ""),
             })
     log.info("GHL CSV: %d rows -> %s", len(records), path)
 
@@ -794,13 +913,13 @@ async def main():
     log.info("Loading parcel data ...")
     parcel.load()
 
-    # 2. Scrape sheriff sales (existing)
+    # 2. Scrape sheriff sales
     scraper = SheriffScraper()
     await scraper.run()
     records = list(scraper.raw_records)
     log.info("Sheriff sale records: %d", len(records))
 
-    # 3. Scrape code violations + condemnations (new Phase 2)
+    # 3. Scrape code violations + condemnations
     code_scraper = CodeViolationScraper()
     code_scraper.run()
     records.extend(code_scraper.raw_records)
