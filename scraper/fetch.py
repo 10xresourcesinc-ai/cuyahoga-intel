@@ -1,11 +1,6 @@
 """
 Cuyahoga County Motivated Seller Lead Scraper
-Scrapes Cuyahoga Common Pleas Court Sheriff Sale docket.
-Real data format (from logs):
-  Attorney: ELLEN FORNASH Appraised $120,000.00 Case #: CV19924853
-  Minimum Bid $80,000.00 Residential PRIMELENDING, A PLAINSCAPITAL COMPANY
-  VS Sale Date 1/12/2026 MITCHELL/RUTH/ Status CANCELLED BY ATTORNEY
-  Parcel # Address Description 703-01-013 1395 SOUTH BELVOIR BOULEVARD
+Scrapes Cuyahoga Common Pleas Court Sheriff Sale docket + Cleveland Code Violations.
 """
 
 import asyncio
@@ -43,12 +38,17 @@ log = logging.getLogger("cuyahoga_scraper")
 
 COURT_URL        = "https://cpdocket.cp.cuyahogacounty.gov"
 SHERIFF_SALE_URL = f"{COURT_URL}/SheriffSearch/search.aspx"
-LOOKBACK_DAYS    = int(os.getenv("LOOKBACK_DAYS", "7"))
+LOOKBACK_DAYS    = int(os.getenv("LOOKBACK_DAYS", "30"))
 REPO_ROOT        = Path(__file__).resolve().parent.parent
 DASHBOARD_JSON   = REPO_ROOT / "dashboard" / "records.json"
 DATA_JSON        = REPO_ROOT / "data" / "records.json"
 GHL_CSV          = REPO_ROOT / "data" / "ghl_export.csv"
 RETRY            = 3
+
+# Cleveland Open Data ArcGIS endpoints
+CLEVELAND_ORG     = "https://services3.arcgis.com/dty2kHktVXHrqO8i/ArcGIS/rest/services"
+VIOLATIONS_URL    = f"{CLEVELAND_ORG}/Complaint_Violation_Notices/FeatureServer/0/query"
+CONDEMNATIONS_URL = f"{CLEVELAND_ORG}/Current_Condemnations/FeatureServer/0/query"
 
 
 # ===========================================================================
@@ -80,6 +80,17 @@ def name_variants(full_name: str) -> list:
             variants.add(f"{parts[-1]}, {' '.join(parts[:-1])}")
     return [v for v in variants if v]
 
+def format_parcel(parcel: str) -> str:
+    """Ensure parcel number has dashes in NNN-NN-NNN format."""
+    if not parcel:
+        return parcel
+    p = parcel.replace("-", "").strip()
+    if len(p) == 8:
+        return f"{p[:3]}-{p[3:5]}-{p[5:]}"
+    elif len(p) == 9:
+        return f"{p[:3]}-{p[3:5]}-{p[5:]}"
+    return parcel
+
 
 # ===========================================================================
 # Sheriff Sale Scraper
@@ -101,7 +112,6 @@ class SheriffScraper:
         })
         self.raw_records: list[dict] = []
 
-    # ------------------------------------------------------------------
     async def run(self):
         log.info("Scraping Cuyahoga Common Pleas Court docket ...")
         log.info("Date range: %s - %s", self.df_str, self.dt_str)
@@ -111,11 +121,9 @@ class SheriffScraper:
             await self._playwright_scrape()
         log.info("Court docket: %d records collected", len(self.raw_records))
 
-    # ------------------------------------------------------------------
     def _scrape_sheriff(self):
         log.info("Trying Sheriff Sale search ...")
         try:
-            # GET page for hidden fields
             r = self.session.get(SHERIFF_SALE_URL, timeout=30)
             r.raise_for_status()
             soup = BeautifulSoup(r.text, "lxml")
@@ -127,7 +135,6 @@ class SheriffScraper:
                 if n:
                     form_data[n] = v
 
-            # Fill date fields
             for k in list(form_data.keys()):
                 kl = k.lower()
                 if any(x in kl for x in ["datefrom","startdate","fromdate"]):
@@ -135,7 +142,6 @@ class SheriffScraper:
                 elif any(x in kl for x in ["dateto","enddate","todate"]):
                     form_data[k] = self.dt_str
 
-            # Common field names
             for fname in ["dateFrom","dateTo","txtDateFrom","txtDateTo",
                           "StartDate","EndDate","dfrom","dto"]:
                 kl = fname.lower()
@@ -147,7 +153,6 @@ class SheriffScraper:
             form_data["__EVENTTARGET"] = ""
             form_data["__EVENTARGUMENT"] = ""
 
-            # Find submit button
             for inp in soup.find_all("input", type="submit"):
                 form_data[inp.get("name", "btnSearch")] = inp.get("value", "Search")
                 break
@@ -162,7 +167,6 @@ class SheriffScraper:
         except Exception as e:
             log.warning("Sheriff sale search failed: %s", e)
 
-    # ------------------------------------------------------------------
     def _parse_html(self, html: str) -> list[dict]:
         records = []
         soup = BeautifulSoup(html, "lxml")
@@ -188,7 +192,6 @@ class SheriffScraper:
 
         return records
 
-    # ------------------------------------------------------------------
     def _extract(self, text: str, row) -> Optional[dict]:
         case_m = re.search(r'Case\s*#\s*:?\s*(CV\s*\d+)', text, re.I)
         if not case_m:
@@ -210,10 +213,7 @@ class SheriffScraper:
             text, re.I
         )
         if not owner_m:
-            owner_m = re.search(
-                r'\bVS\b\s+([A-Z][A-Z/\s,\.\-]{2,60}?)\s+Status',
-                text, re.I
-            )
+            owner_m = re.search(r'\bVS\b\s+([A-Z][A-Z/\s,\.\-]{2,60}?)\s+Status', text, re.I)
         owner = ""
         if owner_m:
             raw = owner_m.group(1).strip()
@@ -280,9 +280,10 @@ class SheriffScraper:
             "mail_state":   "OH",
             "mail_zip":     "",
             "source":       "Court Docket",
+            "neighborhood": "",
+            "viol_status":  "",
         }
 
-    # ------------------------------------------------------------------
     async def _playwright_scrape(self):
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(
@@ -333,27 +334,185 @@ class SheriffScraper:
 
 
 # ===========================================================================
-# Parcel Lookup — MyPlace + GIS enrichment
+# Code Violation Scraper — Cleveland Open Data
+# ===========================================================================
+
+class CodeViolationScraper:
+    """
+    Pulls Cleveland Building & Housing code violations and active condemnations
+    from the City of Cleveland Open Data ArcGIS API.
+    """
+
+    def __init__(self):
+        self.session = requests.Session()
+        self.session.verify = False
+        self.session.headers.update({"User-Agent": "CuyahogaLeadScraper/1.0"})
+        self.raw_records: list[dict] = []
+
+    def run(self):
+        log.info("Scraping Cleveland code violations ...")
+        self._scrape_violations()
+        self._scrape_condemnations()
+        log.info("Code violations + condemnations: %d records", len(self.raw_records))
+
+    def _scrape_violations(self):
+        """Pull recent complaint violation notices within lookback window."""
+        try:
+            cutoff_ms = int((datetime.now() - timedelta(days=LOOKBACK_DAYS)).timestamp() * 1000)
+            params = {
+                "where":             f"FILE_DATE >= {cutoff_ms}",
+                "outFields":         "RECORD_ID,FILE_DATE,PARCEL_NUMBER,PRIMARY_ADDRESS,"
+                                     "VIOLATION_NUMBER,VIOLATION_APP_STATUS,DW_Neighborhood,"
+                                     "VIOLATION_ACCELA_CITIZEN_ACCESS_URL",
+                "f":                 "json",
+                "resultRecordCount": 2000,
+                "returnGeometry":    "false",
+                "orderByFields":     "FILE_DATE DESC",
+            }
+            r = self.session.get(VIOLATIONS_URL, params=params, timeout=30)
+            r.raise_for_status()
+            features = r.json().get("features", [])
+            log.info("Code violations fetched: %d records", len(features))
+
+            for feat in features:
+                rec = self._violation_to_record(feat.get("attributes", {}))
+                if rec:
+                    self.raw_records.append(rec)
+
+        except Exception as e:
+            log.warning("Code violation scrape failed: %s", e)
+
+    def _scrape_condemnations(self):
+        """Pull all currently condemned properties."""
+        try:
+            params = {
+                "where":             "Active_Condemnation='Yes'",
+                "outFields":         "Parcel_Number,Address,Condemnation_Date,DW_Neighborhood",
+                "f":                 "json",
+                "resultRecordCount": 2000,
+                "returnGeometry":    "false",
+                "orderByFields":     "Condemnation_Date DESC",
+            }
+            r = self.session.get(CONDEMNATIONS_URL, params=params, timeout=30)
+            r.raise_for_status()
+            features = r.json().get("features", [])
+            log.info("Condemnations fetched: %d records", len(features))
+
+            for feat in features:
+                rec = self._condemnation_to_record(feat.get("attributes", {}))
+                if rec:
+                    self.raw_records.append(rec)
+
+        except Exception as e:
+            log.warning("Condemnation scrape failed: %s", e)
+
+    def _violation_to_record(self, attrs: dict) -> Optional[dict]:
+        parcel  = format_parcel((attrs.get("PARCEL_NUMBER") or "").strip())
+        address = (attrs.get("PRIMARY_ADDRESS") or "").strip().title()
+        rec_id  = attrs.get("RECORD_ID") or attrs.get("VIOLATION_NUMBER") or ""
+        status  = attrs.get("VIOLATION_APP_STATUS") or ""
+        nbhd    = attrs.get("DW_Neighborhood") or ""
+        url     = attrs.get("VIOLATION_ACCELA_CITIZEN_ACCESS_URL") or ""
+
+        filed = ""
+        ms = attrs.get("FILE_DATE")
+        if ms:
+            try:
+                filed = datetime.fromtimestamp(ms / 1000).strftime("%m/%d/%Y")
+            except Exception:
+                pass
+
+        if not address and not parcel:
+            return None
+
+        zip_m = re.search(r'\b(44\d{3})\b', address)
+        prop_zip = zip_m.group(1) if zip_m else ""
+
+        return {
+            "doc_num":      rec_id,
+            "doc_type":     "CODE",
+            "cat":          "CODE",
+            "cat_label":    "Code Violation",
+            "filed":        filed,
+            "owner":        "",
+            "grantee":      "",
+            "amount":       None,
+            "legal":        parcel,
+            "clerk_url":    url,
+            "prop_address": address,
+            "prop_city":    "Cleveland",
+            "prop_state":   "OH",
+            "prop_zip":     prop_zip,
+            "mail_address": "",
+            "mail_city":    "",
+            "mail_state":   "OH",
+            "mail_zip":     "",
+            "source":       "Cleveland Code Enforcement",
+            "neighborhood": nbhd,
+            "viol_status":  status,
+        }
+
+    def _condemnation_to_record(self, attrs: dict) -> Optional[dict]:
+        parcel  = format_parcel((attrs.get("Parcel_Number") or "").strip())
+        address = (attrs.get("Address") or "").strip().title()
+        nbhd    = attrs.get("DW_Neighborhood") or ""
+
+        filed = ""
+        ms = attrs.get("Condemnation_Date")
+        if ms:
+            try:
+                filed = datetime.fromtimestamp(ms / 1000).strftime("%m/%d/%Y")
+            except Exception:
+                pass
+
+        if not address and not parcel:
+            return None
+
+        # Address format: "2965 E 79 St, Cleveland, Oh, 44104"
+        prop_addr_clean = address
+        prop_city = "Cleveland"
+        if "," in address:
+            parts = [p.strip() for p in address.split(",")]
+            prop_addr_clean = parts[0]
+            if len(parts) > 1:
+                prop_city = parts[1].title()
+
+        zip_m = re.search(r'\b(44\d{3})\b', address)
+        prop_zip = zip_m.group(1) if zip_m else ""
+
+        return {
+            "doc_num":      f"CONDEMN-{parcel or address[:20].replace(' ','-')}",
+            "doc_type":     "CONDEMN",
+            "cat":          "CONDEMN",
+            "cat_label":    "Condemned Property",
+            "filed":        filed,
+            "owner":        "",
+            "grantee":      "",
+            "amount":       None,
+            "legal":        parcel,
+            "clerk_url":    "https://aca-prod.accela.com/COC/",
+            "prop_address": prop_addr_clean,
+            "prop_city":    prop_city,
+            "prop_state":   "OH",
+            "prop_zip":     prop_zip,
+            "mail_address": "",
+            "mail_city":    "",
+            "mail_state":   "OH",
+            "mail_zip":     "",
+            "source":       "Cleveland Code Enforcement",
+            "neighborhood": nbhd,
+            "viol_status":  "Condemned",
+        }
+
+
+# ===========================================================================
+# Parcel Lookup — MyPlace enrichment
 # ===========================================================================
 
 class ParcelLookup:
-    """
-    Enriches leads with parcel data from multiple Cuyahoga County sources:
-    1. MyPlace GIS API — owner, mailing address, assessed value, homestead
-    2. Bulk parcel dataset — for batch owner name lookups
-    """
 
-    # MyPlace parcel service (from Geocortex directory)
     MYPLACE_URL = ("https://gis.cuyahogacounty.us/server/rest/services/"
                    "MyPLACE/Parcels_WMA_GJOIN_WGS84/MapServer/0/query")
-
-    # CAMA parcel service with tax/assessment data — try new geospatial hub first
-    CAMA_URLS = [
-        "https://geospatial.gis.cuyahogacounty.gov/server/rest/services/Parcels/FeatureServer/0/query",
-        "https://geospatial.gis.cuyahogacounty.gov/server/rest/services/CCFO/TaxParcels_WGS84/FeatureServer/0/query",
-        "https://gis.cuyahogacounty.us/server/rest/services/MyPLACE/Parcels_WMA_GJOIN_WGS84/MapServer/0/query",
-        "https://data-cuyahoga.opendata.arcgis.com/datasets/ffaaa1651d5540419469375d680f3245_0/query",
-    ]
 
     def __init__(self):
         self._by_owner   = defaultdict(list)
@@ -367,30 +526,25 @@ class ParcelLookup:
         self._session.verify = False
         self._session.headers.update({"User-Agent": "CuyahogaLeadScraper/1.0"})
 
-        # Test MyPlace URL with correct field name (parcelpin)
         try:
             r = self._session.get(self.MYPLACE_URL, params={
                 "where": "parcelpin='703010013'",
-                "outFields": "parcelpin,parcel_owner,par_addr_all,mail_addr_street,mail_city,mail_state,mail_zip,certified_tax_total",
+                "outFields": "parcelpin,parcel_owner,par_addr_all",
                 "f": "json",
                 "resultRecordCount": 1,
                 "returnGeometry": "false"
             }, timeout=15)
             if r.status_code == 200 and r.json().get("features"):
                 self._working_url = self.MYPLACE_URL
-                log.info("MyPlace API working with parcelpin field: %s", self._working_url)
+                log.info("MyPlace API working: %s", self._working_url)
         except Exception as e:
             log.debug("MyPlace test failed: %s", e)
 
-        # Always use MyPlace URL as fallback regardless
         if not self._working_url:
             self._working_url = self.MYPLACE_URL
             log.info("Using MyPlace URL as fallback: %s", self._working_url)
-        else:
-            log.info("Will use per-parcel lookups via: %s", self._working_url)
 
     def enrich_records(self, records: list) -> int:
-        """Enrich records with parcel data. Returns count enriched."""
         if not self._session:
             return 0
         enriched = 0
@@ -409,98 +563,20 @@ class ParcelLookup:
                     rec["mail_city"]    = match.get("mail_city", "")
                     rec["mail_state"]   = match.get("mail_state") or "OH"
                     rec["mail_zip"]     = match.get("mail_zip", "")
+                if not rec.get("owner") and match.get("owner"):
+                    rec["owner"] = match["owner"]
                 rec["delinquent"]   = match.get("delinquent", False)
                 rec["delinq_amt"]   = match.get("delinq_amt", "")
                 rec["homestead"]    = match.get("homestead", False)
                 rec["appraised"]    = match.get("appraised", "")
                 rec["out_of_state"] = match.get("out_of_state", False)
                 enriched += 1
-            time.sleep(0.3)  # be polite to the API
+            time.sleep(0.3)
         return enriched
 
-    def _ingest(self, r: dict):
-        def g(*keys):
-            for k in keys:
-                for key in [k, k.upper(), k.lower()]:
-                    v = r.get(key)
-                    if v and str(v).strip() not in ("", "None", "null", "0"):
-                        return str(v).strip()
-            return ""
-
-        owner   = g("OWNER", "OWN1")
-        parcel  = g("PARCELNO", "PARID", "APN")
-        site    = g("SITEADDR", "SITE_ADDR", "SITESTREET")
-        city    = g("SITE_CITY")
-        zipcode = g("SITE_ZIP")
-
-        rec = {
-            "owner":       normalize_name(owner),
-            "site_addr":   site,
-            "site_city":   city or "Cleveland",
-            "site_zip":    zipcode,
-            "mail_addr":   g("MAILADR1", "ADDR_1"),
-            "mail_city":   g("MAILCITY", "CITY"),
-            "mail_state":  g("STATE") or "OH",
-            "mail_zip":    g("MAILZIP", "ZIP"),
-            "parcel":      parcel,
-            "delinquent":  g("DELINQUENT", "DELINQ", "BACK_TAX") not in ("", "N", "0", "No"),
-            "delinq_amt":  g("DELINQ_AMT"),
-            "homestead":   g("HOMESTEAD", "HMSTD", "HOMESTEAD_EXM") not in ("", "N", "0", "No"),
-            "appraised":   g("APPVAL", "APPRVAL", "ASSESSED"),
-            "out_of_state":g("OUTOFSTATE", "OUT_OF_STATE") not in ("", "N", "0", "No"),
-        }
-
-        if owner:
-            for v in name_variants(owner):
-                self._by_owner[v].append(rec)
-        if parcel:
-            self._by_parcel[parcel] = rec
-        if site:
-            self._by_address[normalize_name(site)] = rec
-
-    def lookup_parcel(self, parcel_num: str) -> Optional[dict]:
-        if not parcel_num:
-            return None
-        clean = parcel_num.strip()
-        hit = self._by_parcel.get(clean)
-        if hit:
-            return hit
-        nodash = clean.replace("-", "")
-        for k, v in self._by_parcel.items():
-            if k.replace("-", "") == nodash:
-                return v
-        return self._api_lookup_parcel(clean)
-
-    def lookup_owner(self, name: str) -> Optional[dict]:
-        if not name:
-            return None
-        for v in name_variants(name):
-            hits = self._by_owner.get(v)
-            if hits:
-                return hits[0]
-        return None
-
-    def lookup_address(self, address: str) -> Optional[dict]:
-        if not address:
-            return None
-        norm = normalize_name(address)
-        hit = self._by_address.get(norm)
-        if hit:
-            return hit
-        for k, v in self._by_address.items():
-            if norm in k or k in norm:
-                return v
-        return None
-
-    def lookup(self, name: str) -> Optional[dict]:
-        return self.lookup_owner(name)
-
     def _api_lookup_parcel(self, parcel: str) -> Optional[dict]:
-        """Per-parcel API lookup using GIS API, with MyPlace web scrape as fallback."""
         if not self._session:
             return None
-
-        # Use MyPlace WCF service — parcel number WITH dashes
         try:
             log.info("Parcel API lookup: %s", parcel)
             url = f"https://myplace.cuyahogacounty.gov/MyPlaceService.svc/ParcelsAndValuesByAnySearchByAndCity/{parcel}?city=99&searchBy=Parcel"
@@ -510,10 +586,10 @@ class ParcelLookup:
                 data = _json.loads(r.json())
                 if data and data[0]:
                     attrs = data[0][0]
-                    owner = normalize_name(attrs.get("DEEDED_OWNER") or "")
+                    owner     = normalize_name(attrs.get("DEEDED_OWNER") or "")
                     site_addr = (attrs.get("PHYSICAL_ADDRESS") or "").strip().title()
-                    city = (attrs.get("PARCEL_CITY") or "Cleveland").strip().title()
-                    zipcode = str(attrs.get("PARCEL_ZIP") or "")
+                    city      = (attrs.get("PARCEL_CITY") or "Cleveland").strip().title()
+                    zipcode   = str(attrs.get("PARCEL_ZIP") or "")
                     rec = {
                         "owner":       owner,
                         "site_addr":   site_addr,
@@ -536,47 +612,7 @@ class ParcelLookup:
                         return rec
         except Exception as e:
             log.debug("MyPlace WCF lookup failed: %s", e)
-
         return None
-
-    def _parse_myplace_html(self, soup, parcel: str) -> Optional[dict]:
-        text = soup.get_text(" ", strip=True)
-
-        def find_after(label: str, text: str, chars: int = 80) -> str:
-            idx = text.upper().find(label.upper())
-            if idx >= 0:
-                return text[idx+len(label):idx+len(label)+chars].strip()
-            return ""
-
-        owner     = find_after("Owner Name:", text, 60)
-        site_addr = find_after("Property Address:", text, 60)
-        mail_addr = find_after("Mailing Address:", text, 60)
-        city      = find_after("City:", text, 30)
-        state     = find_after("State:", text, 10)
-        zipcode   = find_after("Zip:", text, 10)
-        appraised = find_after("Appraised Value:", text, 20)
-        homestead = "homestead" in text.lower() and "yes" in text[text.lower().find("homestead"):text.lower().find("homestead")+50].lower()
-        delinquent = "delinquent" in text.lower()
-
-        if not owner and not site_addr:
-            return None
-
-        return {
-            "owner":       normalize_name(owner),
-            "site_addr":   site_addr,
-            "site_city":   city or "Cleveland",
-            "site_zip":    re.search(r'\b(44\d{3})\b', zipcode or text or "").group(1) if re.search(r'\b(44\d{3})\b', zipcode or text or "") else "",
-            "mail_addr":   mail_addr,
-            "mail_city":   city,
-            "mail_state":  state or "OH",
-            "mail_zip":    zipcode,
-            "parcel":      parcel,
-            "delinquent":  delinquent,
-            "delinq_amt":  "",
-            "homestead":   homestead,
-            "appraised":   appraised,
-            "out_of_state": False,
-        }
 
 
 # ===========================================================================
@@ -594,18 +630,20 @@ class LeadScorer:
         owner = rec.get("owner", "")
         amt   = rec.get("amount")
 
-        if cat == "LP":      flags.append("Lis pendens");      points += 10
-        if cat == "NOFC":    flags.append("Pre-foreclosure");  points += 10
-        if cat == "TAXDEED": flags.append("Tax deed");         points += 10
-        if cat == "JUD":     flags.append("Judgment lien");    points += 10
+        if cat == "LP":      flags.append("Lis pendens");        points += 10
+        if cat == "NOFC":    flags.append("Pre-foreclosure");    points += 10
+        if cat == "TAXDEED": flags.append("Tax deed");           points += 10
+        if cat == "JUD":     flags.append("Judgment lien");      points += 10
+        if cat == "CODE":    flags.append("Code violation");     points += 15
+        if cat == "CONDEMN": flags.append("Condemned property"); points += 20
         if cat == "LIEN":
             if dtype in ("LNIRS","LNFED","LNCORPTX"): flags.append("Tax lien")
             elif dtype == "LNMECH": flags.append("Mechanic lien")
             elif dtype == "LNHOA":  flags.append("HOA lien")
             else: flags.append("Lien")
             points += 10
-        if cat == "PRO":  flags.append("Probate / estate"); points += 10
-        if cat == "RELLP": flags.append("Lis pendens");     points += 5
+        if cat == "PRO":   flags.append("Probate / estate"); points += 10
+        if cat == "RELLP": flags.append("Lis pendens");      points += 5
 
         norm = normalize_name(owner)
         if norm:
@@ -613,6 +651,8 @@ class LeadScorer:
                           if normalize_name(r.get("owner","")) == norm}
             if "LP" in owner_cats and owner_cats & {"NOFC","TAXDEED"}:
                 points += 20
+            if owner_cats & {"NOFC","LP"} and owner_cats & {"CODE","CONDEMN"}:
+                flags.append("Foreclosure + violation"); points += 25
 
         if amt:
             if amt > 100_000: flags.append("High debt (>$100k)"); points += 15
@@ -651,7 +691,7 @@ GHL_COLS = [
     "Lead Type","Document Type","Date Filed","Document Number","Amount/Debt Owed",
     "Seller Score","Motivated Seller Flags","Source","Public Records URL",
     "Parcel Number","Appraised Value","Delinquent Taxes","Delinquent Amount",
-    "Homestead Exemption","Out-of-State Owner",
+    "Homestead Exemption","Out-of-State Owner","Neighborhood","Violation Status",
 ]
 
 def split_name(n):
@@ -695,12 +735,14 @@ def export_csv(records: list, path: Path):
                 "Delinquent Amount": r.get("delinq_amt", ""),
                 "Homestead Exemption": "Yes" if r.get("homestead") else "No",
                 "Out-of-State Owner": "Yes" if r.get("out_of_state") else "No",
+                "Neighborhood":      r.get("neighborhood", ""),
+                "Violation Status":  r.get("viol_status", ""),
             })
     log.info("GHL CSV: %d rows -> %s", len(records), path)
 
 
 # ===========================================================================
-# Save (merges with manual uploads)
+# Save
 # ===========================================================================
 
 def save_json(data: dict, *paths: Path):
@@ -741,45 +783,52 @@ def save_json(data: dict, *paths: Path):
 
 async def main():
     log.info("=" * 60)
-    log.info("Cuyahoga County Lead Scraper — Court Docket")
+    log.info("Cuyahoga County Lead Scraper — Court Docket + Code Violations")
     log.info("Range: %s -> %s",
              (datetime.now() - timedelta(days=LOOKBACK_DAYS)).strftime("%m/%d/%Y"),
              datetime.now().strftime("%m/%d/%Y"))
     log.info("=" * 60)
 
-    # 1. Load parcel data
+    # 1. Load parcel lookup
     parcel = ParcelLookup()
     log.info("Loading parcel data ...")
     parcel.load()
 
-    # 2. Scrape
+    # 2. Scrape sheriff sales (existing)
     scraper = SheriffScraper()
     await scraper.run()
-    records = scraper.raw_records
+    records = list(scraper.raw_records)
+    log.info("Sheriff sale records: %d", len(records))
 
-    # 3. Enrich addresses from parcel data
+    # 3. Scrape code violations + condemnations (new Phase 2)
+    code_scraper = CodeViolationScraper()
+    code_scraper.run()
+    records.extend(code_scraper.raw_records)
+    log.info("Total records after adding violations: %d", len(records))
+
+    # 4. Enrich all records with parcel owner/address data
     log.info("Enriching records with parcel data ...")
     enriched = parcel.enrich_records(records)
     log.info("Enriched %d/%d records with parcel data", enriched, len(records))
 
-    # 4. Score
+    # 5. Score all records
     for rec in records:
         rec["score"], rec["flags"] = LeadScorer.score(rec, records)
 
-    # 5. Deduplicate
+    # 6. Deduplicate
     seen = {}
     for rec in records:
         key = rec.get("doc_num") or rec.get("clerk_url") or str(id(rec))
         if key not in seen or rec["score"] > seen[key]["score"]:
             seen[key] = rec
     records = sorted(seen.values(), key=lambda r: r["score"], reverse=True)
-    log.info("Unique auto records: %d", len(records))
+    log.info("Unique records after dedup: %d", len(records))
 
-    # 6. Save
+    # 7. Save
     with_addr = sum(1 for r in records if r.get("prop_address") or r.get("mail_address"))
     output = {
         "fetched_at": datetime.now(timezone.utc).isoformat(),
-        "source":     "Cuyahoga County Court Docket + Manual Uploads",
+        "source":     "Cuyahoga County Court Docket + Code Violations + Manual Uploads",
         "date_range": {
             "from": (datetime.now() - timedelta(days=LOOKBACK_DAYS)).strftime("%m/%d/%Y"),
             "to":   datetime.now().strftime("%m/%d/%Y"),
