@@ -911,13 +911,8 @@ class ParcelLookup:
                     city      = (attrs.get("PARCEL_CITY") or "Cleveland").strip().title()
                     zipcode   = str(attrs.get("PARCEL_ZIP") or "")
 
-                    # LUC = Land Use Code. 510 = Single Family Residential.
-                    # Log raw attrs on first enrichment so we can confirm field name.
-                    luc = str(attrs.get("LUC") or attrs.get("LANDUSECODE")
-                               or attrs.get("LAND_USE_CODE") or attrs.get("USE_CODE") or "")
-                    # Log raw attrs on first 3 enrichments so we can confirm LUC field name
-                    if len(self._by_parcel) < 3:
-                        log.info("MyPlace raw fields for %s: %s", parcel, dict(attrs))
+                    # WCF endpoint has no LUC — fetch from ArcGIS parcel layer separately
+                    luc = self._lookup_luc(parcel)
 
                     rec = {
                         "owner":       owner,
@@ -938,11 +933,36 @@ class ParcelLookup:
                     }
                     if owner or site_addr:
                         self._by_parcel[parcel] = rec
-                        log.info("Parcel enriched: %s -> %s, %s", parcel, site_addr, city)
+                        log.info("Parcel enriched: %s -> %s, %s (LUC=%s)",
+                                 parcel, site_addr, city, luc)
                         return rec
         except Exception as e:
             log.debug("MyPlace WCF lookup failed: %s", e)
         return None
+
+    def _lookup_luc(self, parcel: str) -> str:
+        """Fetch Land Use Code from Cuyahoga ArcGIS parcel layer."""
+        try:
+            pin = parcel.replace("-", "")
+            r = self._session.get(self.MYPLACE_URL, params={
+                "where":             f"parcelpin='{pin}'",
+                "outFields":         "parcelpin,luc,class,classname,landuse",
+                "f":                 "json",
+                "resultRecordCount": 1,
+                "returnGeometry":    "false",
+            }, timeout=10)
+            if r.status_code == 200:
+                feats = r.json().get("features", [])
+                if feats:
+                    a = feats[0].get("attributes", {})
+                    if len(self._by_parcel) < 3:
+                        log.info("ArcGIS parcel LUC fields for %s: %s", parcel, a)
+                    luc = (str(a.get("luc") or a.get("class") or
+                               a.get("classname") or a.get("landuse") or "")).strip()
+                    return luc
+        except Exception as e:
+            log.debug("LUC lookup failed for %s: %s", parcel, e)
+        return ""
 
 
 # ===========================================================================
