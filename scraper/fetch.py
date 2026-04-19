@@ -889,6 +889,7 @@ class ParcelLookup:
                 rec["homestead"]    = match.get("homestead", False)
                 rec["appraised"]    = match.get("appraised", "")
                 rec["out_of_state"] = match.get("out_of_state", False)
+                rec["luc"]          = match.get("luc", "")
                 enriched += 1
             time.sleep(0.3)
         return enriched
@@ -909,6 +910,15 @@ class ParcelLookup:
                     site_addr = (attrs.get("PHYSICAL_ADDRESS") or "").strip().title()
                     city      = (attrs.get("PARCEL_CITY") or "Cleveland").strip().title()
                     zipcode   = str(attrs.get("PARCEL_ZIP") or "")
+
+                    # LUC = Land Use Code. 510 = Single Family Residential.
+                    # Log raw attrs on first enrichment so we can confirm field name.
+                    luc = str(attrs.get("LUC") or attrs.get("LANDUSECODE")
+                               or attrs.get("LAND_USE_CODE") or attrs.get("USE_CODE") or "")
+                    if not self._by_parcel:   # first enrichment — log all keys
+                        log.info("MyPlace raw fields for %s: %s", parcel,
+                                 {k: v for k, v in attrs.items() if v not in (None, "")})
+
                     rec = {
                         "owner":       owner,
                         "site_addr":   site_addr,
@@ -924,6 +934,7 @@ class ParcelLookup:
                         "homestead":   False,
                         "appraised":   str(attrs.get("CERTIFIED_TAX_TOTAL") or ""),
                         "out_of_state": False,
+                        "luc":         luc,
                     }
                     if owner or site_addr:
                         self._by_parcel[parcel] = rec
@@ -1145,6 +1156,18 @@ async def main():
     log.info("Enriching records with parcel data ...")
     enriched = parcel.enrich_records(records)
     log.info("Enriched %d/%d records with parcel data", enriched, len(records))
+
+    # 4b. Filter to Single Family Residential + Vacant Land only
+    # Cuyahoga LUC 510 = SFH, 410/411/412 = Vacant Residential Land
+    # Records without a LUC (parcel lookup failed) are kept.
+    before_sfh = len(records)
+    KEEP_LUCS = {"510", "510.0", "410", "411", "412", "400", "401"}
+    records = [
+        r for r in records
+        if not r.get("luc") or str(r.get("luc", "")).strip() in KEEP_LUCS
+    ]
+    log.info("SFH+Land filter: %d → %d records (removed %d non-qualifying)",
+             before_sfh, len(records), before_sfh - len(records))
 
     # 5. Score all records
     for rec in records:
