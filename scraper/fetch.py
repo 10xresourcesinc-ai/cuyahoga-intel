@@ -1176,6 +1176,35 @@ async def main():
     for rec in records:
         rec["score"], rec["flags"] = LeadScorer.score(rec, records)
 
+    # 5b. Parcel cross-reference — boost records where same parcel has multiple hit types
+    # Groups by parcel number, much more reliable than owner name matching
+    parcel_cats = defaultdict(set)
+    parcel_recs = defaultdict(list)
+    for rec in records:
+        p = rec.get("legal", "")
+        if p:
+            parcel_cats[p].add(rec.get("cat", ""))
+            parcel_recs[p].append(rec)
+
+    multi_hit_parcels = 0
+    for p, cats in parcel_cats.items():
+        has_fc   = bool(cats & {"NOFC", "LP", "TAXDEED"})
+        has_viol = bool(cats & {"CODE", "CONDEMN"})
+        if has_fc and has_viol:
+            multi_hit_parcels += 1
+            for rec in parcel_recs[p]:
+                if "Foreclosure + violation" not in rec["flags"]:
+                    rec["flags"].insert(0, "🔥 Foreclosure + violation")
+                rec["score"] = min(100, rec["score"] + 25)
+        elif len(cats) > 1:
+            # Multiple violation types on same parcel — smaller boost
+            for rec in parcel_recs[p]:
+                if "Multi-hit parcel" not in rec["flags"]:
+                    rec["flags"].append("Multi-hit parcel")
+                rec["score"] = min(100, rec["score"] + 10)
+
+    log.info("Cross-reference: %d parcels with foreclosure + violation", multi_hit_parcels)
+
     # 6. Deduplicate
     seen = {}
     for rec in records:
