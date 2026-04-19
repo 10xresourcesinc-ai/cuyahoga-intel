@@ -433,10 +433,6 @@ class CodeViolationScraper:
 
     def _scrape_violations(self):
         cutoff_dt   = datetime.now() - timedelta(days=LOOKBACK_DAYS)
-        cutoff_ms   = int(cutoff_dt.timestamp() * 1000)
-        # FILE_DATE has precision:1 meaning it may store as days-since-epoch * 86400000
-        # OR as a standard esriFieldTypeDate in ms. We try both plus SQL fallback.
-        cutoff_days = int(cutoff_dt.timestamp() / 86400)   # days since Unix epoch
         cutoff_sql  = cutoff_dt.strftime("%Y-%m-%d")
 
         # Only request fields that actually exist in this layer (no type/description field)
@@ -451,11 +447,9 @@ class CodeViolationScraper:
 
         features = []
         for where_clause in [
-            f"FILE_DATE >= {cutoff_ms}",                    # standard ms epoch
-            f"FILE_DATE >= {cutoff_days}",                  # days epoch (precision:1)
-            f"FILE_DATE >= DATE '{cutoff_sql}'",            # SQL date string
-            f"FILE_DATE >= '{cutoff_sql}'",                 # plain string date
-            "1=1",                                          # last resort: everything
+            f"FILE_DATE >= DATE '{cutoff_sql}'",   # SQL date string — confirmed working
+            f"FILE_DATE >= '{cutoff_sql}'",         # plain string fallback
+            "1=1",                                  # last resort
         ]:
             try:
                 params = {
@@ -943,23 +937,32 @@ class ParcelLookup:
     def _lookup_luc(self, parcel: str) -> str:
         """Fetch Land Use Code from Cuyahoga ArcGIS parcel layer."""
         try:
-            pin = parcel.replace("-", "")
-            r = self._session.get(self.MYPLACE_URL, params={
-                "where":             f"parcelpin='{pin}'",
-                "outFields":         "parcelpin,luc,class,classname,landuse",
-                "f":                 "json",
-                "resultRecordCount": 1,
-                "returnGeometry":    "false",
-            }, timeout=10)
-            if r.status_code == 200:
-                feats = r.json().get("features", [])
-                if feats:
-                    a = feats[0].get("attributes", {})
-                    if len(self._by_parcel) < 3:
-                        log.info("ArcGIS parcel LUC fields for %s: %s", parcel, a)
-                    luc = (str(a.get("luc") or a.get("class") or
-                               a.get("classname") or a.get("landuse") or "")).strip()
-                    return luc
+            # Try both with and without dashes — layer may use either format
+            for pin in [parcel.replace("-", ""), parcel]:
+                r = self._session.get(self.MYPLACE_URL, params={
+                    "where":             f"parcelpin='{pin}'",
+                    "outFields":         "*",
+                    "f":                 "json",
+                    "resultRecordCount": 1,
+                    "returnGeometry":    "false",
+                }, timeout=10)
+                if r.status_code == 200:
+                    feats = r.json().get("features", [])
+                    if feats:
+                        a = feats[0].get("attributes", {})
+                        # Log all fields on first 3 hits so we can find the LUC field
+                        if len(self._by_parcel) < 3:
+                            log.info("ArcGIS parcel ALL fields for %s: %s", parcel, a)
+                        # Try every likely field name for property class / land use
+                        luc = ""
+                        for fn in ["luc", "class", "par_class", "classname",
+                                   "class_description", "landuse", "land_use",
+                                   "use_code", "prop_class", "property_class"]:
+                            val = a.get(fn) or a.get(fn.upper())
+                            if val:
+                                luc = str(val).strip()
+                                break
+                        return luc
         except Exception as e:
             log.debug("LUC lookup failed for %s: %s", parcel, e)
         return ""
