@@ -521,9 +521,25 @@ class CodeViolationScraper:
         url     = (attrs.get("VIOLATION_ACCELA_CITIZEN_ACCESS_URL")
                    or attrs.get("COMPLAINT_ACCELA_CITIZEN_ACCESS_URL") or "")
 
+        # Skip violations that are resolved/closed — not worth following up
+        SKIP_STATUSES = {
+            "closed", "withdrawn", "void", "cancelled", "resolved",
+            "duplicate", "no violation found", "dismissed",
+        }
+        if status.lower().strip() in SKIP_STATUSES:
+            return None
+
         # This layer has no violation type/description field — label generically
         viol_desc = ""
         cat, cat_label = "CODE", "Code Violation"
+
+        # Severity tier based on status — used by scorer
+        if "chief approved" in status.lower():
+            viol_severity = "high"
+        elif any(x in status.lower() for x in ["mailed", "open", "created"]):
+            viol_severity = "medium"
+        else:
+            viol_severity = "low"
 
         # FILE_DATE: try ms epoch first, then days epoch (precision:1), then raw
         filed = ""
@@ -563,10 +579,11 @@ class CodeViolationScraper:
             "mail_city":    "",
             "mail_state":   "OH",
             "mail_zip":     "",
-            "source":       "Cleveland Code Enforcement",
-            "neighborhood": nbhd,
-            "viol_status":  status,
-            "viol_desc":    viol_desc,
+            "source":        "Cleveland Code Enforcement",
+            "neighborhood":  nbhd,
+            "viol_status":   status,
+            "viol_desc":     viol_desc,
+            "viol_severity": viol_severity,
         }
 
     def _condemnation_to_record(self, attrs: dict) -> Optional[dict]:
@@ -936,7 +953,15 @@ class LeadScorer:
         if cat == "NOFC":    flags.append("Pre-foreclosure");    points += 10
         if cat == "TAXDEED": flags.append("Tax deed");           points += 10
         if cat == "JUD":     flags.append("Judgment lien");      points += 10
-        if cat == "CODE":    flags.append("Code violation");     points += 15
+        if cat == "CODE":
+            flags.append("Code violation")
+            points += 15
+            sev = rec.get("viol_severity", "")
+            if sev == "high":
+                flags.append("Chief Approved violation")
+                points += 15
+            elif sev == "medium":
+                points += 5
         if cat == "CONDEMN": flags.append("Condemned property"); points += 20
         if cat == "LIEN":
             if dtype in ("LNIRS","LNFED","LNCORPTX"): flags.append("Tax lien")
@@ -994,7 +1019,7 @@ GHL_COLS = [
     "Seller Score","Motivated Seller Flags","Source","Public Records URL",
     "Parcel Number","Appraised Value","Delinquent Taxes","Delinquent Amount",
     "Homestead Exemption","Out-of-State Owner","Neighborhood","Violation Status",
-    "Violation Description",
+    "Violation Description","Violation Severity",
 ]
 
 def split_name(n):
@@ -1041,6 +1066,7 @@ def export_csv(records: list, path: Path):
                 "Neighborhood":      r.get("neighborhood", ""),
                 "Violation Status":  r.get("viol_status", ""),
                 "Violation Description": r.get("viol_desc", ""),
+                "Violation Severity": r.get("viol_severity", "").title(),
             })
     log.info("GHL CSV: %d rows -> %s", len(records), path)
 
