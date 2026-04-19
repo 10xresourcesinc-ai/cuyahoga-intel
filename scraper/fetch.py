@@ -894,64 +894,44 @@ class ParcelLookup:
             return None
         try:
             log.info("Parcel API lookup: %s", parcel)
-            # ArcGIS layer uses 9-char pin with no dashes
-            pin = parcel.replace("-", "")
-            r = self._session.get(self.MYPLACE_URL, params={
-                "where":             f"parcelpin='{pin}'",
-                "outFields":         "parcelpin,deeded_owner,par_addr_all,par_city,par_zip,"
-                                     "mail_name,mail_addr_street,mail_city,mail_state,mail_zip,"
-                                     "tax_luc,tax_luc_description,certified_tax_total",
-                "f":                 "json",
-                "resultRecordCount": 1,
-                "returnGeometry":    "false",
-            }, timeout=15)
+            url = f"https://myplace.cuyahogacounty.gov/MyPlaceService.svc/ParcelsAndValuesByAnySearchByAndCity/{parcel}?city=99&searchBy=Parcel"
+            r = self._session.get(url, timeout=15)
             if r.status_code == 200:
-                feats = r.json().get("features", [])
-                if feats:
-                    a = feats[0].get("attributes", {})
-                    owner     = normalize_name(a.get("deeded_owner") or "")
-                    site_addr = (a.get("par_addr_all") or "").strip().title()
-                    # par_addr_all format: "1395 SOUTH BELVOIR BLVD, SOUTH EUCLID, OH, 44121"
-                    site_city = (a.get("par_city") or "Cleveland").strip().title()
-                    site_zip  = str(int(a.get("par_zip") or 0) or "")
-                    mail_addr = (a.get("mail_addr_street") or "").strip().title()
-                    mail_city = (a.get("mail_city") or "").strip().title()
-                    mail_state= (a.get("mail_state") or "OH").strip()
-                    mail_zip  = str(a.get("mail_zip") or "").strip()
-                    luc       = str(a.get("tax_luc") or "").strip()
-                    luc_desc  = str(a.get("tax_luc_description") or "").strip().title()
-                    appraised = str(a.get("certified_tax_total") or "")
-                    out_of_state = mail_state not in ("OH", "")
-
+                import json as _json
+                data = _json.loads(r.json())
+                if data and data[0]:
+                    attrs = data[0][0]
+                    owner     = normalize_name(attrs.get("DEEDED_OWNER") or "")
+                    site_addr = (attrs.get("PHYSICAL_ADDRESS") or "").strip().title()
+                    city      = (attrs.get("PARCEL_CITY") or "Cleveland").strip().title()
+                    zipcode   = str(attrs.get("PARCEL_ZIP") or "")
                     rec = {
                         "owner":        owner,
                         "site_addr":    site_addr,
-                        "site_city":    site_city,
-                        "site_zip":     site_zip,
-                        "mail_addr":    mail_addr,
-                        "mail_city":    mail_city,
-                        "mail_state":   mail_state,
-                        "mail_zip":     mail_zip,
+                        "site_city":    city,
+                        "site_zip":     zipcode,
+                        "mail_addr":    "",
+                        "mail_city":    "",
+                        "mail_state":   "OH",
+                        "mail_zip":     "",
                         "parcel":       parcel,
                         "delinquent":   False,
                         "delinq_amt":   "",
                         "homestead":    False,
-                        "appraised":    appraised,
-                        "out_of_state": out_of_state,
-                        "luc":          luc,
-                        "luc_desc":     luc_desc,
+                        "appraised":    str(attrs.get("CERTIFIED_TAX_TOTAL") or ""),
+                        "out_of_state": False,
+                        "luc":          "",
+                        "luc_desc":     "",
                     }
                     if owner or site_addr:
                         self._by_parcel[parcel] = rec
-                        log.info("Parcel enriched: %s -> %s, %s (LUC=%s %s)",
-                                 parcel, site_addr, site_city, luc, luc_desc)
+                        log.info("Parcel enriched: %s -> %s, %s", parcel, site_addr, city)
                         return rec
         except Exception as e:
-            log.debug("ArcGIS parcel lookup failed: %s", e)
+            log.debug("MyPlace WCF lookup failed: %s", e)
         return None
 
     def _lookup_luc(self, parcel: str) -> str:
-        """Deprecated — LUC now fetched in _api_lookup_parcel."""
         return ""
 
 
@@ -1168,21 +1148,27 @@ async def main():
     enriched = parcel.enrich_records(records)
     log.info("Enriched %d/%d records with parcel data", enriched, len(records))
 
-    # 4b. Filter to Single Family Residential + Vacant Residential Land only
-    # Cuyahoga tax_luc codes: 510=SFH, 401-412=Vacant Residential Land
-    # Records without LUC (parcel lookup failed) are kept so we don't miss leads.
-    before_sfh = len(records)
-    KEEP_LUCS = {
-        "510",              # Single Family Residential
-        "401","402","403",  # Vacant Residential Land
-        "404","405","406",
-        "407","408","409",
-        "410","411","412",
+    # 4b. Filter to SFH + Vacant Land using available signals
+    # LUC not available from these endpoints — infer from description and owner signals
+    EXCLUDE_KEYWORDS = {
+        "CONDO", "CONDOMINIUM", "APARTMENTS", "APT", "COMMERCIAL",
+        "INDUSTRIAL", "WAREHOUSE", "RETAIL", "OFFICE", "PLAZA",
+        "SHOPPING", "CHURCH", "SCHOOL", "HOSPITAL", "UNIVERSITY",
+        "LLC PORTFOLIO", "HOLDINGS LLC",
     }
-    records = [
-        r for r in records
-        if not r.get("luc") or r.get("luc", "").strip() in KEEP_LUCS
-    ]
+    def is_sfh_or_land(rec: dict) -> bool:
+        # Always keep if no address info to filter on
+        addr  = (rec.get("prop_address") or "").upper()
+        owner = (rec.get("owner") or "").upper()
+        legal = (rec.get("legal_desc") or rec.get("legal") or "").upper()
+        combined = f"{addr} {owner} {legal}"
+        # Exclude known non-SFH keywords
+        if any(kw in combined for kw in EXCLUDE_KEYWORDS):
+            return False
+        return True
+
+    before_sfh = len(records)
+    records = [r for r in records if is_sfh_or_land(r)]
     log.info("SFH+Land filter: %d → %d records (removed %d non-qualifying)",
              before_sfh, len(records), before_sfh - len(records))
 
