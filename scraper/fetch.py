@@ -629,28 +629,42 @@ class CodeViolationScraper:
 ACCELA_CACHE_FILE = REPO_ROOT / "data" / "accela_cache.json"
 
 # Keywords to look for in Accela page text → (cat, label)
+# Based on real Cleveland Accela page values
 ACCELA_KEYWORDS = {
-    "TALL GRASS":      ("CODE_GRASS",    "Tall Grass / Weeds"),
-    "WEED":            ("CODE_GRASS",    "Tall Grass / Weeds"),
-    "OVERGROWN":       ("CODE_GRASS",    "Tall Grass / Weeds"),
-    "GARBAGE":         ("CODE_DEBRIS",   "Garbage / Debris"),
-    "DEBRIS":          ("CODE_DEBRIS",   "Garbage / Debris"),
-    "TRASH":           ("CODE_DEBRIS",   "Garbage / Debris"),
-    "JUNK":            ("CODE_DEBRIS",   "Garbage / Debris"),
-    "DUMPING":         ("CODE_DEBRIS",   "Garbage / Debris"),
-    "STRUCTURAL":      ("CODE_STRUCT",   "Structural Issue"),
-    "EXTERIOR":        ("CODE_STRUCT",   "Structural Issue"),
-    "FOUNDATION":      ("CODE_STRUCT",   "Structural Issue"),
-    "ROOF":            ("CODE_STRUCT",   "Structural Issue"),
-    "VACANT":          ("CODE_STRUCT",   "Vacant / Unsecured"),
-    "UNSECURED":       ("CODE_STRUCT",   "Vacant / Unsecured"),
-    "OPEN AND VACANT": ("CODE_STRUCT",   "Vacant / Unsecured"),
-    "NUISANCE":        ("CODE_NUISANCE", "Property Nuisance"),
-    "INOPERABLE":      ("CODE_NUISANCE", "Inoperable Vehicle"),
-    "ELECTRICAL":      ("CODE_MECH",     "Electrical Issue"),
-    "PLUMBING":        ("CODE_MECH",     "Plumbing Issue"),
-    "RODENT":          ("CODE_PEST",     "Rodent / Pest"),
-    "RAT":             ("CODE_PEST",     "Rodent / Pest"),
+    # Vacant / distressed
+    "VACANT AND DISTRESSED":  ("CODE_STRUCT",   "Vacant / Distressed Property"),
+    "VACANT":                 ("CODE_STRUCT",   "Vacant / Unsecured"),
+    "UNSECURED":              ("CODE_STRUCT",   "Vacant / Unsecured"),
+    "OPEN AND VACANT":        ("CODE_STRUCT",   "Vacant / Unsecured"),
+    # Condemnation-related complaints
+    "CONDEMNATION":           ("CODE_CONDEMN",  "Condemnation Complaint"),
+    "ICLB":                   ("CODE_CONDEMN",  "Condemnation Complaint"),
+    # Structural / exterior
+    "COMPLETE INTERIOR/EXTERIOR": ("CODE_STRUCT", "Interior/Exterior Issue"),
+    "INTERIOR/EXTERIOR":      ("CODE_STRUCT",   "Interior/Exterior Issue"),
+    "STRUCTURAL":             ("CODE_STRUCT",   "Structural Issue"),
+    "EXTERIOR":               ("CODE_STRUCT",   "Structural Issue"),
+    "FOUNDATION":             ("CODE_STRUCT",   "Structural Issue"),
+    "ROOF":                   ("CODE_STRUCT",   "Structural Issue"),
+    # Tall grass / weeds
+    "TALL GRASS":             ("CODE_GRASS",    "Tall Grass / Weeds"),
+    "WEED":                   ("CODE_GRASS",    "Tall Grass / Weeds"),
+    "OVERGROWN":              ("CODE_GRASS",    "Tall Grass / Weeds"),
+    # Garbage / debris
+    "GARBAGE":                ("CODE_DEBRIS",   "Garbage / Debris"),
+    "DEBRIS":                 ("CODE_DEBRIS",   "Garbage / Debris"),
+    "TRASH":                  ("CODE_DEBRIS",   "Garbage / Debris"),
+    "JUNK":                   ("CODE_DEBRIS",   "Garbage / Debris"),
+    "DUMPING":                ("CODE_DEBRIS",   "Garbage / Debris"),
+    # Nuisance / vehicle
+    "NUISANCE":               ("CODE_NUISANCE", "Property Nuisance"),
+    "INOPERABLE":             ("CODE_NUISANCE", "Inoperable Vehicle"),
+    # Mechanical / systems
+    "ELECTRICAL":             ("CODE_MECH",     "Electrical Issue"),
+    "PLUMBING":               ("CODE_MECH",     "Plumbing Issue"),
+    # Pest
+    "RODENT":                 ("CODE_PEST",     "Rodent / Pest"),
+    "RAT":                    ("CODE_PEST",     "Rodent / Pest"),
 }
 
 
@@ -730,57 +744,63 @@ class AccelaScraper:
             r = self._session.get(url, timeout=20)
             if r.status_code != 200:
                 log.debug("Accela HTTP %d for %s", r.status_code, record_id)
-                # Cache the miss so we don't retry forever
                 return {"cat": "CODE", "cat_label": "Code Violation", "viol_desc": ""}
 
             soup = BeautifulSoup(r.text, "lxml")
 
-            # Accela pages put the record type / description in various places.
-            # We grab all visible text and scan for keywords.
-            # Log the first record's candidate text so we can tune keywords.
-            candidate_text = ""
+            # Target the exact fields visible on Cleveland's Accela pages:
+            # 1. "Project Description" — e.g. "Vacant and Distressed Property"
+            # 2. "Type of Complaint"   — e.g. "Int/ext for condemnation for ICLB"
+            # 3. "Descriptive nature of complaint" — free-text detail
+            candidate_parts = []
 
-            # Try common Accela field label patterns first
-            for label_text in ["Record Type", "Description", "Work Description",
-                                "Complaint Type", "Violation Type", "Notice Type"]:
-                label = soup.find(string=re.compile(label_text, re.I))
-                if label:
-                    # Value is usually in the next sibling td or span
-                    parent = label.find_parent(["td", "th", "label", "span"])
+            for label_text in [
+                "Project Description",
+                "Type of Complaint",
+                "Descriptive nature of complaint",
+                "Record Type",
+                "Description",
+            ]:
+                # Find the label element
+                label_el = soup.find(string=re.compile(
+                    r"^\s*" + re.escape(label_text) + r"\s*:?\s*$", re.I
+                ))
+                if not label_el:
+                    # broader search — label may have extra whitespace or be in an element
+                    label_el = soup.find(string=re.compile(label_text, re.I))
+
+                if label_el:
+                    parent = label_el.find_parent(["td", "th", "dt", "label", "span", "div"])
                     if parent:
-                        sibling = parent.find_next_sibling()
-                        if sibling:
-                            candidate_text = sibling.get_text(" ", strip=True)
-                            if candidate_text:
-                                break
+                        # Value is typically the next sibling element
+                        nxt = parent.find_next_sibling()
+                        if nxt:
+                            val = nxt.get_text(" ", strip=True)
+                            if val and len(val) < 200:
+                                candidate_parts.append(val)
 
-            # Fallback: grab the page title or first heading
+            candidate_text = " | ".join(p for p in candidate_parts if p)
+
+            # Fallback: full visible page text (first 600 chars)
             if not candidate_text:
-                for tag in ["h1", "h2", "h3", "title"]:
-                    el = soup.find(tag)
-                    if el:
-                        candidate_text = el.get_text(" ", strip=True)
-                        break
+                candidate_text = soup.get_text(" ", strip=True)[:600]
 
-            # Fallback: full page text (truncated)
-            if not candidate_text:
-                candidate_text = soup.get_text(" ", strip=True)[:500]
-
-            log.debug("Accela %s candidate text: %s", record_id, candidate_text[:200])
-
-            # First record gets INFO-level log so you can see what we're parsing
-            if len(self._cache) == 0:
-                log.info("ACCELA SAMPLE TEXT for %s: %s", record_id, candidate_text[:300])
+            # Log every new record at DEBUG; log first few at INFO so you can verify
+            if len(self._cache) < 5:
+                log.info("ACCELA %s → %s", record_id, candidate_text[:250])
+            else:
+                log.debug("Accela %s → %s", record_id, candidate_text[:150])
 
             upper = candidate_text.upper()
             for keyword, (cat, label) in ACCELA_KEYWORDS.items():
                 if keyword in upper:
-                    log.debug("Accela %s → %s", record_id, label)
-                    return {"cat": cat, "cat_label": label, "viol_desc": candidate_text[:100]}
+                    log.debug("Accela %s matched '%s' → %s", record_id, keyword, label)
+                    return {"cat": cat, "cat_label": label, "viol_desc": candidate_text[:150]}
 
-            # No keyword matched — store raw text so we can expand keywords later
+            # No keyword matched — cache with raw text so we can expand keywords later
+            log.debug("Accela %s — no keyword match, raw: %s", record_id, candidate_text[:150])
             return {"cat": "CODE", "cat_label": "Code Violation",
-                    "viol_desc": candidate_text[:100]}
+                    "viol_desc": candidate_text[:150]}
 
         except Exception as e:
             log.debug("Accela fetch failed for %s: %s", record_id, e)
