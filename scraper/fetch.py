@@ -623,6 +623,171 @@ class CodeViolationScraper:
 
 
 # ===========================================================================
+# Accela Violation Type Scraper — cached, only hits new records
+# ===========================================================================
+
+ACCELA_CACHE_FILE = REPO_ROOT / "data" / "accela_cache.json"
+
+# Keywords to look for in Accela page text → (cat, label)
+ACCELA_KEYWORDS = {
+    "TALL GRASS":      ("CODE_GRASS",    "Tall Grass / Weeds"),
+    "WEED":            ("CODE_GRASS",    "Tall Grass / Weeds"),
+    "OVERGROWN":       ("CODE_GRASS",    "Tall Grass / Weeds"),
+    "GARBAGE":         ("CODE_DEBRIS",   "Garbage / Debris"),
+    "DEBRIS":          ("CODE_DEBRIS",   "Garbage / Debris"),
+    "TRASH":           ("CODE_DEBRIS",   "Garbage / Debris"),
+    "JUNK":            ("CODE_DEBRIS",   "Garbage / Debris"),
+    "DUMPING":         ("CODE_DEBRIS",   "Garbage / Debris"),
+    "STRUCTURAL":      ("CODE_STRUCT",   "Structural Issue"),
+    "EXTERIOR":        ("CODE_STRUCT",   "Structural Issue"),
+    "FOUNDATION":      ("CODE_STRUCT",   "Structural Issue"),
+    "ROOF":            ("CODE_STRUCT",   "Structural Issue"),
+    "VACANT":          ("CODE_STRUCT",   "Vacant / Unsecured"),
+    "UNSECURED":       ("CODE_STRUCT",   "Vacant / Unsecured"),
+    "OPEN AND VACANT": ("CODE_STRUCT",   "Vacant / Unsecured"),
+    "NUISANCE":        ("CODE_NUISANCE", "Property Nuisance"),
+    "INOPERABLE":      ("CODE_NUISANCE", "Inoperable Vehicle"),
+    "ELECTRICAL":      ("CODE_MECH",     "Electrical Issue"),
+    "PLUMBING":        ("CODE_MECH",     "Plumbing Issue"),
+    "RODENT":          ("CODE_PEST",     "Rodent / Pest"),
+    "RAT":             ("CODE_PEST",     "Rodent / Pest"),
+}
+
+
+class AccelaScraper:
+    """
+    For each CODE violation record that has an Accela URL, fetches the page
+    and extracts the violation type. Results are cached permanently in
+    data/accela_cache.json — only new (unseen) record IDs are ever fetched.
+    """
+
+    def __init__(self):
+        self._cache: dict[str, dict] = {}   # record_id → {cat, cat_label, viol_desc}
+        self._session = requests.Session()
+        self._session.verify = False
+        self._session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                          "AppleWebKit/537.36 Chrome/122.0 Safari/537.36",
+        })
+
+    def load_cache(self):
+        if ACCELA_CACHE_FILE.exists():
+            try:
+                with open(ACCELA_CACHE_FILE, "r", encoding="utf-8") as f:
+                    self._cache = json.load(f)
+                log.info("Accela cache loaded: %d entries", len(self._cache))
+            except Exception as e:
+                log.warning("Accela cache load failed: %s", e)
+                self._cache = {}
+
+    def save_cache(self):
+        ACCELA_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(ACCELA_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(self._cache, f, indent=2)
+        log.info("Accela cache saved: %d entries", len(self._cache))
+
+    def enrich_violations(self, records: list) -> int:
+        """
+        For CODE records not already in cache, fetch their Accela URL and
+        extract violation type. Updates record in place. Returns count enriched.
+        """
+        to_fetch = [
+            r for r in records
+            if r.get("cat") == "CODE"
+            and r.get("clerk_url")
+            and r.get("doc_num") not in self._cache
+        ]
+        log.info("Accela: %d cached, %d new to fetch", len(self._cache), len(to_fetch))
+
+        enriched = 0
+        for i, rec in enumerate(to_fetch):
+            result = self._fetch_violation_type(rec["clerk_url"], rec["doc_num"])
+            if result:
+                self._cache[rec["doc_num"]] = result
+                enriched += 1
+            time.sleep(0.5)   # be polite to Accela server
+            if (i + 1) % 10 == 0:
+                self.save_cache()   # save every 10 in case of crash
+
+        if to_fetch:
+            self.save_cache()
+
+        # Apply cache to ALL CODE records (including previously cached ones)
+        applied = 0
+        for rec in records:
+            if rec.get("cat") == "CODE" and rec.get("doc_num") in self._cache:
+                cached = self._cache[rec["doc_num"]]
+                rec["doc_type"]  = cached.get("cat", rec["doc_type"])
+                rec["cat_label"] = cached.get("cat_label", rec["cat_label"])
+                rec["viol_desc"] = cached.get("viol_desc", rec.get("viol_desc", ""))
+                applied += 1
+
+        log.info("Accela: enriched %d new, applied %d from cache", enriched, applied)
+        return enriched
+
+    def _fetch_violation_type(self, url: str, record_id: str) -> Optional[dict]:
+        try:
+            r = self._session.get(url, timeout=20)
+            if r.status_code != 200:
+                log.debug("Accela HTTP %d for %s", r.status_code, record_id)
+                # Cache the miss so we don't retry forever
+                return {"cat": "CODE", "cat_label": "Code Violation", "viol_desc": ""}
+
+            soup = BeautifulSoup(r.text, "lxml")
+
+            # Accela pages put the record type / description in various places.
+            # We grab all visible text and scan for keywords.
+            # Log the first record's candidate text so we can tune keywords.
+            candidate_text = ""
+
+            # Try common Accela field label patterns first
+            for label_text in ["Record Type", "Description", "Work Description",
+                                "Complaint Type", "Violation Type", "Notice Type"]:
+                label = soup.find(string=re.compile(label_text, re.I))
+                if label:
+                    # Value is usually in the next sibling td or span
+                    parent = label.find_parent(["td", "th", "label", "span"])
+                    if parent:
+                        sibling = parent.find_next_sibling()
+                        if sibling:
+                            candidate_text = sibling.get_text(" ", strip=True)
+                            if candidate_text:
+                                break
+
+            # Fallback: grab the page title or first heading
+            if not candidate_text:
+                for tag in ["h1", "h2", "h3", "title"]:
+                    el = soup.find(tag)
+                    if el:
+                        candidate_text = el.get_text(" ", strip=True)
+                        break
+
+            # Fallback: full page text (truncated)
+            if not candidate_text:
+                candidate_text = soup.get_text(" ", strip=True)[:500]
+
+            log.debug("Accela %s candidate text: %s", record_id, candidate_text[:200])
+
+            # First record gets INFO-level log so you can see what we're parsing
+            if len(self._cache) == 0:
+                log.info("ACCELA SAMPLE TEXT for %s: %s", record_id, candidate_text[:300])
+
+            upper = candidate_text.upper()
+            for keyword, (cat, label) in ACCELA_KEYWORDS.items():
+                if keyword in upper:
+                    log.debug("Accela %s → %s", record_id, label)
+                    return {"cat": cat, "cat_label": label, "viol_desc": candidate_text[:100]}
+
+            # No keyword matched — store raw text so we can expand keywords later
+            return {"cat": "CODE", "cat_label": "Code Violation",
+                    "viol_desc": candidate_text[:100]}
+
+        except Exception as e:
+            log.debug("Accela fetch failed for %s: %s", record_id, e)
+            return None
+
+
+# ===========================================================================
 # Parcel Lookup — MyPlace enrichment
 # ===========================================================================
 
@@ -924,6 +1089,11 @@ async def main():
     code_scraper.run()
     records.extend(code_scraper.raw_records)
     log.info("Total records after adding violations: %d", len(records))
+
+    # 3b. Enrich violation types from Accela (cached — only fetches new records)
+    accela = AccelaScraper()
+    accela.load_cache()
+    accela.enrich_violations(records)
 
     # 4. Enrich all records with parcel owner/address data
     log.info("Enriching records with parcel data ...")
