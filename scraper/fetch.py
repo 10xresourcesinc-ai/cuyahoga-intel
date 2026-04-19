@@ -915,9 +915,9 @@ class ParcelLookup:
                     # Log raw attrs on first enrichment so we can confirm field name.
                     luc = str(attrs.get("LUC") or attrs.get("LANDUSECODE")
                                or attrs.get("LAND_USE_CODE") or attrs.get("USE_CODE") or "")
-                    if not self._by_parcel:   # first enrichment — log all keys
-                        log.info("MyPlace raw fields for %s: %s", parcel,
-                                 {k: v for k, v in attrs.items() if v not in (None, "")})
+                    # Log raw attrs on first 3 enrichments so we can confirm LUC field name
+                    if len(self._by_parcel) < 3:
+                        log.info("MyPlace raw fields for %s: %s", parcel, dict(attrs))
 
                     rec = {
                         "owner":       owner,
