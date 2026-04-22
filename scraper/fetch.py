@@ -896,39 +896,56 @@ class ParcelLookup:
             log.info("Parcel API lookup: %s", parcel)
             url = f"https://myplace.cuyahogacounty.gov/MyPlaceService.svc/ParcelsAndValuesByAnySearchByAndCity/{parcel}?city=99&searchBy=Parcel"
             r = self._session.get(url, timeout=15)
-            if r.status_code == 200:
-                import json as _json
-                data = _json.loads(r.json())
-                if data and data[0]:
-                    attrs = data[0][0]
-                    owner     = normalize_name(attrs.get("DEEDED_OWNER") or "")
-                    site_addr = (attrs.get("PHYSICAL_ADDRESS") or "").strip().title()
-                    city      = (attrs.get("PARCEL_CITY") or "Cleveland").strip().title()
-                    zipcode   = str(attrs.get("PARCEL_ZIP") or "")
-                    rec = {
-                        "owner":        owner,
-                        "site_addr":    site_addr,
-                        "site_city":    city,
-                        "site_zip":     zipcode,
-                        "mail_addr":    "",
-                        "mail_city":    "",
-                        "mail_state":   "OH",
-                        "mail_zip":     "",
-                        "parcel":       parcel,
-                        "delinquent":   False,
-                        "delinq_amt":   "",
-                        "homestead":    False,
-                        "appraised":    str(attrs.get("CERTIFIED_TAX_TOTAL") or ""),
-                        "out_of_state": False,
-                        "luc":          "",
-                        "luc_desc":     "",
-                    }
-                    if owner or site_addr:
-                        self._by_parcel[parcel] = rec
-                        log.info("Parcel enriched: %s -> %s, %s", parcel, site_addr, city)
-                        return rec
+            if r.status_code != 200:
+                log.warning("Parcel API HTTP %d for %s", r.status_code, parcel)
+                return None
+
+            # WCF returns a JSON string inside a JSON string — handle both cases
+            import json as _json
+            raw = r.text.strip()
+            try:
+                data = _json.loads(raw)
+                if isinstance(data, str):
+                    data = _json.loads(data)  # double-encoded
+            except Exception as e:
+                log.warning("Parcel JSON parse failed for %s: %s | raw: %s",
+                            parcel, e, raw[:200])
+                return None
+
+            if not data or not data[0]:
+                return None
+
+            attrs = data[0][0] if isinstance(data[0], list) else data[0]
+            owner     = normalize_name(attrs.get("DEEDED_OWNER") or "")
+            site_addr = (attrs.get("PHYSICAL_ADDRESS") or "").strip().title()
+            city      = (attrs.get("PARCEL_CITY") or "Cleveland").strip().title()
+            zipcode   = str(attrs.get("PARCEL_ZIP") or "")
+            rec = {
+                "owner":        owner,
+                "site_addr":    site_addr,
+                "site_city":    city,
+                "site_zip":     zipcode,
+                "mail_addr":    "",
+                "mail_city":    "",
+                "mail_state":   "OH",
+                "mail_zip":     "",
+                "parcel":       parcel,
+                "delinquent":   False,
+                "delinq_amt":   "",
+                "homestead":    False,
+                "appraised":    str(attrs.get("CERTIFIED_TAX_TOTAL") or ""),
+                "out_of_state": False,
+                "luc":          "",
+                "luc_desc":     "",
+            }
+            if owner or site_addr:
+                self._by_parcel[parcel] = rec
+                log.info("Parcel enriched: %s -> %s, %s", parcel, site_addr, city)
+                return rec
+            return None
+
         except Exception as e:
-            log.debug("MyPlace WCF lookup failed: %s", e)
+            log.warning("MyPlace WCF lookup failed for %s: %s", parcel, e)
         return None
 
     def _lookup_luc(self, parcel: str) -> str:
@@ -1138,10 +1155,11 @@ async def main():
     records.extend(code_scraper.raw_records)
     log.info("Total records after adding violations: %d", len(records))
 
-    # 3b. Enrich violation types from Accela (cached — only fetches new records)
-    accela = AccelaScraper()
-    accela.load_cache()
-    accela.enrich_violations(records)
+    # 3b. Accela violation type scraper disabled — pages are JS-rendered,
+    # BeautifulSoup only gets the login nav bar. Re-enable if Playwright added.
+    # accela = AccelaScraper()
+    # accela.load_cache()
+    # accela.enrich_violations(records)
 
     # 4. Enrich all records with parcel owner/address data
     log.info("Enriching records with parcel data ...")
@@ -1177,11 +1195,14 @@ async def main():
         rec["score"], rec["flags"] = LeadScorer.score(rec, records)
 
     # 5b. Parcel cross-reference — boost records where same parcel has multiple hit types
-    # Groups by parcel number, much more reliable than owner name matching
+    # Normalize all parcel numbers to digits-only for reliable matching
+    def norm_parcel(p: str) -> str:
+        return re.sub(r"[^0-9]", "", p or "")
+
     parcel_cats = defaultdict(set)
     parcel_recs = defaultdict(list)
     for rec in records:
-        p = rec.get("legal", "")
+        p = norm_parcel(rec.get("legal", ""))
         if p:
             parcel_cats[p].add(rec.get("cat", ""))
             parcel_recs[p].append(rec)
