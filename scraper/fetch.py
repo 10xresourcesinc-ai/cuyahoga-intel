@@ -1,6 +1,10 @@
 """
 Cuyahoga County Motivated Seller Lead Scraper
-Scrapes Cuyahoga Common Pleas Court Sheriff Sale docket + Cleveland Code Violations.
+Sources:
+  NOFC    — Cuyahoga Common Pleas Court sheriff sale docket
+  CODE    — Cleveland ArcGIS code violations
+  CONDEMN — Cleveland ArcGIS condemnations
+  PRO     — Cuyahoga County Probate Court estate filings  ← Phase 3
 """
 
 import asyncio
@@ -12,7 +16,7 @@ import re
 import sys
 import time
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
 from pathlib import Path
 from typing import Optional
 
@@ -20,7 +24,7 @@ import requests
 from bs4 import BeautifulSoup
 
 try:
-    from playwright.async_api import async_playwright, TimeoutError as PWTimeout
+    from playwright.async_api import async_playwright
     PLAYWRIGHT_AVAILABLE = True
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
@@ -36,6 +40,9 @@ logging.basicConfig(
 )
 log = logging.getLogger("cuyahoga_scraper")
 
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
 COURT_URL        = "https://cpdocket.cp.cuyahogacounty.gov"
 SHERIFF_SALE_URL = f"{COURT_URL}/SheriffSearch/search.aspx"
 LOOKBACK_DAYS    = int(os.getenv("LOOKBACK_DAYS", "30"))
@@ -43,17 +50,20 @@ REPO_ROOT        = Path(__file__).resolve().parent.parent
 DASHBOARD_JSON   = REPO_ROOT / "dashboard" / "records.json"
 DATA_JSON        = REPO_ROOT / "data" / "records.json"
 GHL_CSV          = REPO_ROOT / "data" / "ghl_export.csv"
-RETRY            = 3
+ACCELA_CACHE_FILE = REPO_ROOT / "data" / "accela_cache.json"
 
-# Cleveland Open Data ArcGIS endpoints
 CLEVELAND_ORG     = "https://services3.arcgis.com/dty2kHktVXHrqO8i/ArcGIS/rest/services"
 VIOLATIONS_URL    = f"{CLEVELAND_ORG}/Complaint_Violation_Notices/FeatureServer/0/query"
 CONDEMNATIONS_URL = f"{CLEVELAND_ORG}/Current_Condemnations/FeatureServer/0/query"
 VIOLATIONS_META   = f"{CLEVELAND_ORG}/Complaint_Violation_Notices/FeatureServer/0"
 
+PROBATE_BASE   = "https://probate.cuyahogacounty.gov/pa"
+PROBATE_TOS    = f"{PROBATE_BASE}/TOS.aspx"
+PROBATE_SEARCH = f"{PROBATE_BASE}/CaseSearch.aspx"
+
 
 # ===========================================================================
-# Helpers
+# Shared helpers
 # ===========================================================================
 
 def parse_amount(text) -> Optional[float]:
@@ -82,19 +92,16 @@ def name_variants(full_name: str) -> list:
     return [v for v in variants if v]
 
 def format_parcel(parcel: str) -> str:
-    """Ensure parcel number has dashes in NNN-NN-NNN format."""
     if not parcel:
         return parcel
     p = parcel.replace("-", "").strip()
-    if len(p) == 8:
-        return f"{p[:3]}-{p[3:5]}-{p[5:]}"
-    elif len(p) == 9:
+    if len(p) in (8, 9):
         return f"{p[:3]}-{p[3:5]}-{p[5:]}"
     return parcel
 
 
 # ===========================================================================
-# Sheriff Sale Scraper
+# Sheriff Sale Scraper  (NOFC)
 # ===========================================================================
 
 class SheriffScraper:
@@ -138,20 +145,20 @@ class SheriffScraper:
 
             for k in list(form_data.keys()):
                 kl = k.lower()
-                if any(x in kl for x in ["datefrom","startdate","fromdate"]):
+                if any(x in kl for x in ["datefrom", "startdate", "fromdate"]):
                     form_data[k] = self.df_str
-                elif any(x in kl for x in ["dateto","enddate","todate"]):
+                elif any(x in kl for x in ["dateto", "enddate", "todate"]):
                     form_data[k] = self.dt_str
 
-            for fname in ["dateFrom","dateTo","txtDateFrom","txtDateTo",
-                          "StartDate","EndDate","dfrom","dto"]:
+            for fname in ["dateFrom", "dateTo", "txtDateFrom", "txtDateTo",
+                          "StartDate", "EndDate", "dfrom", "dto"]:
                 kl = fname.lower()
-                if any(x in kl for x in ["from","start"]):
+                if any(x in kl for x in ["from", "start"]):
                     form_data[fname] = self.df_str
                 else:
                     form_data[fname] = self.dt_str
 
-            form_data["__EVENTTARGET"] = ""
+            form_data["__EVENTTARGET"]   = ""
             form_data["__EVENTARGUMENT"] = ""
 
             for inp in soup.find_all("input", type="submit"):
@@ -160,7 +167,6 @@ class SheriffScraper:
 
             resp = self.session.post(SHERIFF_SALE_URL, data=form_data, timeout=30)
             resp.raise_for_status()
-
             recs = self._parse_html(resp.text)
             self.raw_records.extend(recs)
             log.info("Sheriff sales: %d records", len(recs))
@@ -171,7 +177,6 @@ class SheriffScraper:
     def _parse_html(self, html: str) -> list[dict]:
         records = []
         soup = BeautifulSoup(html, "lxml")
-
         blocks = []
         for table in soup.find_all("table"):
             for row in table.find_all("tr"):
@@ -190,7 +195,6 @@ class SheriffScraper:
                     records.append(rec)
             except Exception as e:
                 log.debug("Extract error: %s", e)
-
         return records
 
     def _extract(self, text: str, row) -> Optional[dict]:
@@ -201,7 +205,10 @@ class SheriffScraper:
             return None
         case_num = case_m.group(1).replace(" ", "").upper()
 
-        att_m = re.search(r'Attorney\s*:\s*([A-Z][A-Z\s,\.]+?)(?=\s+Appraised|\s+Case\s*#|\s+\$)', text, re.I)
+        att_m = re.search(
+            r'Attorney\s*:\s*([A-Z][A-Z\s,\.]+?)(?=\s+Appraised|\s+Case\s*#|\s+\$)',
+            text, re.I
+        )
         plaintiff = att_m.group(1).strip().title() if att_m else ""
 
         date_m = re.search(r'Sale\s+Date\s+(\d{1,2}/\d{1,2}/\d{4})', text, re.I)
@@ -232,7 +239,10 @@ class SheriffScraper:
             )
             if addr_m:
                 addr_raw = addr_m.group(1)
-                addr_raw = re.sub(r'\s+(A\s+SINGLE|DWELLING|COMMERCIAL|VACANT|LOT|WITH\s+).*$', '', addr_raw, flags=re.I)
+                addr_raw = re.sub(
+                    r'\s+(A\s+SINGLE|DWELLING|COMMERCIAL|VACANT|LOT|WITH\s+).*$',
+                    '', addr_raw, flags=re.I
+                )
                 prop_address = addr_raw.strip().title()
 
         if not prop_address:
@@ -289,45 +299,39 @@ class SheriffScraper:
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(
                 headless=True,
-                args=["--no-sandbox","--disable-setuid-sandbox",
-                      "--disable-dev-shm-usage","--disable-gpu"],
+                args=["--no-sandbox", "--disable-setuid-sandbox",
+                      "--disable-dev-shm-usage", "--disable-gpu"],
             )
             page = await (await browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                            "AppleWebKit/537.36 Chrome/122.0 Safari/537.36",
                 ignore_https_errors=True,
             )).new_page()
-
             try:
                 await page.goto(SHERIFF_SALE_URL, wait_until="networkidle", timeout=40_000)
                 await asyncio.sleep(2)
-
-                for sel in ["input[name*='dateFrom']","input[name*='StartDate']","#dateFrom"]:
+                for sel in ["input[name*='dateFrom']", "input[name*='StartDate']", "#dateFrom"]:
                     try:
                         await page.fill(sel, self.df_str); break
                     except Exception:
                         continue
-
-                for sel in ["input[name*='dateTo']","input[name*='EndDate']","#dateTo"]:
+                for sel in ["input[name*='dateTo']", "input[name*='EndDate']", "#dateTo"]:
                     try:
                         await page.fill(sel, self.dt_str); break
                     except Exception:
                         continue
-
-                for sel in ["input[type='submit']","button:has-text('Search')"]:
+                for sel in ["input[type='submit']", "button:has-text('Search')"]:
                     try:
                         await page.click(sel)
                         await page.wait_for_load_state("networkidle", timeout=25_000)
                         break
                     except Exception:
                         continue
-
                 await asyncio.sleep(2)
                 content = await page.content()
                 recs = self._parse_html(content)
                 self.raw_records.extend(recs)
                 log.info("Playwright sheriff: %d records", len(recs))
-
             except Exception as e:
                 log.warning("Playwright error: %s", e)
             finally:
@@ -335,11 +339,9 @@ class SheriffScraper:
 
 
 # ===========================================================================
-# Code Violation Scraper — Cleveland Open Data
-# PHASE 3 UPDATE: schema discovery + violation type classification
+# Code Violation + Condemnation Scraper  (CODE / CONDEMN)
 # ===========================================================================
 
-# Violation description keyword → (cat subtype, human label)
 VIOL_TYPE_MAP = {
     "TALL GRASS":      ("CODE_GRASS",   "Tall Grass / Weeds"),
     "WEED":            ("CODE_GRASS",   "Tall Grass / Weeds"),
@@ -401,41 +403,35 @@ class CodeViolationScraper:
         log.info("Code violations + condemnations: %d records", len(self.raw_records))
 
     def _discover_schema(self):
-        """Read field names from ArcGIS layer metadata so our queries use the right names."""
         try:
             r = self.session.get(VIOLATIONS_META, params={"f": "json"}, timeout=15)
             r.raise_for_status()
             fields = r.json().get("fields", [])
             self._avail_fields = [f["name"] for f in fields]
             log.info("ArcGIS violation layer fields: %s", self._avail_fields)
-
-            for candidate in ["FILE_DATE","COMPLAINT_DATE","DATE_FILED","OPEN_DATE","CREATEDATE"]:
+            for candidate in ["FILE_DATE", "COMPLAINT_DATE", "DATE_FILED",
+                               "OPEN_DATE", "CREATEDATE"]:
                 if candidate in self._avail_fields:
                     self._date_field = candidate
                     log.info("Using date field: %s", self._date_field)
                     break
-
-            for candidate in ["COMPLAINT_TYPE","VIOLATION_TYPE","VIOLATION_DESC",
-                               "DESCRIPTION","RECORD_TYPE","TYPE_DESC","CASE_TYPE",
-                               "COMPLAINT_DESC","WORK_DESCRIPTION","NOTICE_TYPE"]:
+            for candidate in ["COMPLAINT_TYPE", "VIOLATION_TYPE", "VIOLATION_DESC",
+                               "DESCRIPTION", "RECORD_TYPE", "TYPE_DESC", "CASE_TYPE",
+                               "COMPLAINT_DESC", "WORK_DESCRIPTION", "NOTICE_TYPE"]:
                 if candidate in self._avail_fields:
                     self._type_field = candidate
                     log.info("Using violation type field: %s", self._type_field)
                     break
-
         except Exception as e:
             log.warning("Schema discovery failed: %s — using defaults", e)
-
         if not self._date_field:
             self._date_field = "FILE_DATE"
         if not self._type_field:
             self._type_field = "COMPLAINT_TYPE"
 
     def _scrape_violations(self):
-        cutoff_dt   = datetime.now() - timedelta(days=LOOKBACK_DAYS)
-        cutoff_sql  = cutoff_dt.strftime("%Y-%m-%d")
-
-        # Only request fields that actually exist in this layer (no type/description field)
+        cutoff_dt  = datetime.now() - timedelta(days=LOOKBACK_DAYS)
+        cutoff_sql = cutoff_dt.strftime("%Y-%m-%d")
         desired = [
             "RECORD_ID", "VIOLATION_NUMBER", "FILE_DATE",
             "PARCEL_NUMBER", "PRIMARY_ADDRESS",
@@ -444,12 +440,11 @@ class CodeViolationScraper:
             "COMPLAINT_ACCELA_CITIZEN_ACCESS_URL",
             "VIOLATION_ACCELA_CITIZEN_ACCESS_URL",
         ]
-
         features = []
         for where_clause in [
-            f"FILE_DATE >= DATE '{cutoff_sql}'",   # SQL date string — confirmed working
-            f"FILE_DATE >= '{cutoff_sql}'",         # plain string fallback
-            "1=1",                                  # last resort
+            f"FILE_DATE >= DATE '{cutoff_sql}'",
+            f"FILE_DATE >= '{cutoff_sql}'",
+            "1=1",
         ]:
             try:
                 params = {
@@ -463,18 +458,14 @@ class CodeViolationScraper:
                 r = self.session.get(VIOLATIONS_URL, params=params, timeout=30)
                 r.raise_for_status()
                 data = r.json()
-
                 if "error" in data:
                     log.warning("ArcGIS error with where='%s': %s", where_clause, data["error"])
                     continue
-
                 features = data.get("features", [])
                 log.info("WHERE '%s' → %d features", where_clause, len(features))
-
                 if features:
                     log.info("SAMPLE violation record: %s", features[0].get("attributes", {}))
                     break
-
             except Exception as e:
                 log.warning("Violation query failed (where='%s'): %s", where_clause, e)
                 continue
@@ -515,7 +506,6 @@ class CodeViolationScraper:
         url     = (attrs.get("VIOLATION_ACCELA_CITIZEN_ACCESS_URL")
                    or attrs.get("COMPLAINT_ACCELA_CITIZEN_ACCESS_URL") or "")
 
-        # Skip violations that are resolved/closed — not worth following up
         SKIP_STATUSES = {
             "closed", "withdrawn", "void", "cancelled", "resolved",
             "duplicate", "no violation found", "dismissed",
@@ -523,11 +513,9 @@ class CodeViolationScraper:
         if status.lower().strip() in SKIP_STATUSES:
             return None
 
-        # This layer has no violation type/description field — label generically
         viol_desc = ""
         cat, cat_label = "CODE", "Code Violation"
 
-        # Severity tier based on status — used by scorer
         if "chief approved" in status.lower():
             viol_severity = "high"
         elif any(x in status.lower() for x in ["mailed", "open", "created"]):
@@ -535,15 +523,14 @@ class CodeViolationScraper:
         else:
             viol_severity = "low"
 
-        # FILE_DATE: try ms epoch first, then days epoch (precision:1), then raw
         filed = ""
         raw_date = attrs.get("FILE_DATE")
         if raw_date:
             try:
                 val = int(raw_date)
-                if val > 1_000_000_000_000:          # looks like ms epoch
+                if val > 1_000_000_000_000:
                     filed = datetime.fromtimestamp(val / 1000).strftime("%m/%d/%Y")
-                elif val > 10_000:                    # looks like days epoch
+                elif val > 10_000:
                     filed = datetime.fromtimestamp(val * 86400).strftime("%m/%d/%Y")
             except Exception:
                 pass
@@ -573,10 +560,10 @@ class CodeViolationScraper:
             "mail_city":    "",
             "mail_state":   "OH",
             "mail_zip":     "",
-            "source":        "Cleveland Code Enforcement",
-            "neighborhood":  nbhd,
-            "viol_status":   status,
-            "viol_desc":     viol_desc,
+            "source":       "Cleveland Code Enforcement",
+            "neighborhood": nbhd,
+            "viol_status":  status,
+            "viol_desc":    viol_desc,
             "viol_severity": viol_severity,
         }
 
@@ -608,7 +595,7 @@ class CodeViolationScraper:
         prop_zip = zip_m.group(1) if zip_m else ""
 
         return {
-            "doc_num":      f"CONDEMN-{parcel or address[:20].replace(' ','-')}",
+            "doc_num":      f"CONDEMN-{parcel or address[:20].replace(' ', '-')}",
             "doc_type":     "CONDEMN",
             "cat":          "CONDEMN",
             "cat_label":    "Condemned Property",
@@ -630,192 +617,253 @@ class CodeViolationScraper:
             "neighborhood": nbhd,
             "viol_status":  "Condemned",
             "viol_desc":    "",
+            "viol_severity": "high",
         }
 
 
 # ===========================================================================
-# Accela Violation Type Scraper — cached, only hits new records
+# Probate Court Scraper  (PRO)  — Phase 3
 # ===========================================================================
 
-ACCELA_CACHE_FILE = REPO_ROOT / "data" / "accela_cache.json"
-
-# Keywords to look for in Accela page text → (cat, label)
-# Based on real Cleveland Accela page values
-ACCELA_KEYWORDS = {
-    # Vacant / distressed
-    "VACANT AND DISTRESSED":  ("CODE_STRUCT",   "Vacant / Distressed Property"),
-    "VACANT":                 ("CODE_STRUCT",   "Vacant / Unsecured"),
-    "UNSECURED":              ("CODE_STRUCT",   "Vacant / Unsecured"),
-    "OPEN AND VACANT":        ("CODE_STRUCT",   "Vacant / Unsecured"),
-    # Condemnation-related complaints
-    "CONDEMNATION":           ("CODE_CONDEMN",  "Condemnation Complaint"),
-    "ICLB":                   ("CODE_CONDEMN",  "Condemnation Complaint"),
-    # Structural / exterior
-    "COMPLETE INTERIOR/EXTERIOR": ("CODE_STRUCT", "Interior/Exterior Issue"),
-    "INTERIOR/EXTERIOR":      ("CODE_STRUCT",   "Interior/Exterior Issue"),
-    "STRUCTURAL":             ("CODE_STRUCT",   "Structural Issue"),
-    "EXTERIOR":               ("CODE_STRUCT",   "Structural Issue"),
-    "FOUNDATION":             ("CODE_STRUCT",   "Structural Issue"),
-    "ROOF":                   ("CODE_STRUCT",   "Structural Issue"),
-    # Tall grass / weeds
-    "TALL GRASS":             ("CODE_GRASS",    "Tall Grass / Weeds"),
-    "WEED":                   ("CODE_GRASS",    "Tall Grass / Weeds"),
-    "OVERGROWN":              ("CODE_GRASS",    "Tall Grass / Weeds"),
-    # Garbage / debris
-    "GARBAGE":                ("CODE_DEBRIS",   "Garbage / Debris"),
-    "DEBRIS":                 ("CODE_DEBRIS",   "Garbage / Debris"),
-    "TRASH":                  ("CODE_DEBRIS",   "Garbage / Debris"),
-    "JUNK":                   ("CODE_DEBRIS",   "Garbage / Debris"),
-    "DUMPING":                ("CODE_DEBRIS",   "Garbage / Debris"),
-    # Nuisance / vehicle
-    "NUISANCE":               ("CODE_NUISANCE", "Property Nuisance"),
-    "INOPERABLE":             ("CODE_NUISANCE", "Inoperable Vehicle"),
-    # Mechanical / systems
-    "ELECTRICAL":             ("CODE_MECH",     "Electrical Issue"),
-    "PLUMBING":               ("CODE_MECH",     "Plumbing Issue"),
-    # Pest
-    "RODENT":                 ("CODE_PEST",     "Rodent / Pest"),
-    "RAT":                    ("CODE_PEST",     "Rodent / Pest"),
-}
-
-
-class AccelaScraper:
+class ProbateScraper:
     """
-    For each CODE violation record that has an Accela URL, fetches the page
-    and extracts the violation type. Results are cached permanently in
-    data/accela_cache.json — only new (unseen) record IDs are ever fetched.
+    Scrapes estate filings from the Cuyahoga County Probate Court public portal.
+    Platform: PROWARE 2.6 (ASP.NET WebForms)
+
+    Strategy:
+      1. GET /pa/TOS.aspx  → accept terms → get session cookie
+      2. GET /pa/CaseSearch.aspx → scrape ViewState tokens
+      3. POST party-name search with category=ES (Estate) + filing date window
+      4. Parse results table → yield one PRO record per estate filing
     """
 
     def __init__(self):
-        self._cache: dict[str, dict] = {}   # record_id → {cat, cat_label, viol_desc}
-        self._session = requests.Session()
-        self._session.verify = False
-        self._session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                          "AppleWebKit/537.36 Chrome/122.0 Safari/537.36",
+        self.raw_records: list[dict] = []
+        self._session: Optional[requests.Session] = None
+
+    def run(self):
+        log.info("Scraping Cuyahoga Probate Court estate filings ...")
+        try:
+            self._session = self._make_session()
+            self._search_estates()
+        except Exception as e:
+            log.warning("Probate scraper failed: %s", e)
+        log.info("Probate estates: %d records", len(self.raw_records))
+
+    # ------------------------------------------------------------------
+    # Session / ToS
+    # ------------------------------------------------------------------
+
+    def _make_session(self) -> requests.Session:
+        session = requests.Session()
+        session.verify = True
+        session.headers.update({
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 Chrome/124.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,*/*",
         })
 
-    def load_cache(self):
-        if ACCELA_CACHE_FILE.exists():
-            try:
-                with open(ACCELA_CACHE_FILE, "r", encoding="utf-8") as f:
-                    self._cache = json.load(f)
-                log.info("Accela cache loaded: %d entries", len(self._cache))
-            except Exception as e:
-                log.warning("Accela cache load failed: %s", e)
-                self._cache = {}
+        # Step 1 — GET TOS page for ViewState tokens
+        resp = session.get(PROBATE_TOS, timeout=30)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+        vs = self._get_viewstate(soup)
 
-    def save_cache(self):
-        ACCELA_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(ACCELA_CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump(self._cache, f, indent=2)
-        log.info("Accela cache saved: %d entries", len(self._cache))
+        if not vs.get("__VIEWSTATE"):
+            raise RuntimeError("No ViewState on TOS page — site layout may have changed.")
 
-    def enrich_violations(self, records: list) -> int:
-        """
-        For CODE records not already in cache, fetch their Accela URL and
-        extract violation type. Updates record in place. Returns count enriched.
-        """
-        to_fetch = [
-            r for r in records
-            if r.get("cat") == "CODE"
-            and r.get("clerk_url")
-            and r.get("doc_num") not in self._cache
-        ]
-        log.info("Accela: %d cached, %d new to fetch", len(self._cache), len(to_fetch))
+        # Step 2 — POST to accept TOS
+        accept_btn = soup.find("input", {"type": "submit"})
+        btn_name   = accept_btn["name"]  if accept_btn else "btnAccept"
+        btn_value  = accept_btn["value"] if accept_btn else "I Accept"
 
-        enriched = 0
-        for i, rec in enumerate(to_fetch):
-            result = self._fetch_violation_type(rec["clerk_url"], rec["doc_num"])
-            if result:
-                self._cache[rec["doc_num"]] = result
-                enriched += 1
-            time.sleep(0.5)   # be polite to Accela server
-            if (i + 1) % 10 == 0:
-                self.save_cache()   # save every 10 in case of crash
+        payload = {
+            **vs,
+            "__EVENTTARGET":   "",
+            "__EVENTARGUMENT": "",
+            btn_name:          btn_value,
+        }
+        resp = session.post(PROBATE_TOS, data=payload, timeout=30)
+        resp.raise_for_status()
+        log.info("Probate TOS accepted.")
+        return session
 
-        if to_fetch:
-            self.save_cache()
+    # ------------------------------------------------------------------
+    # Search
+    # ------------------------------------------------------------------
 
-        # Apply cache to ALL CODE records (including previously cached ones)
-        applied = 0
-        for rec in records:
-            if rec.get("cat") == "CODE" and rec.get("doc_num") in self._cache:
-                cached = self._cache[rec["doc_num"]]
-                rec["doc_type"]  = cached.get("cat", rec["doc_type"])
-                rec["cat_label"] = cached.get("cat_label", rec["cat_label"])
-                rec["viol_desc"] = cached.get("viol_desc", rec.get("viol_desc", ""))
-                applied += 1
+    def _search_estates(self):
+        date_to   = date.today()
+        date_from = date_to - timedelta(days=LOOKBACK_DAYS)
+        log.info("Probate search window: %s → %s", date_from, date_to)
 
-        log.info("Accela: enriched %d new, applied %d from cache", enriched, applied)
-        return enriched
+        # GET CaseSearch page for fresh ViewState
+        resp = self._session.get(PROBATE_SEARCH, timeout=30)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
 
-    def _fetch_violation_type(self, url: str, record_id: str) -> Optional[dict]:
-        try:
-            r = self._session.get(url, timeout=20)
-            if r.status_code != 200:
-                log.debug("Accela HTTP %d for %s", r.status_code, record_id)
-                return {"cat": "CODE", "cat_label": "Code Violation", "viol_desc": ""}
+        payload = self._build_payload(soup, date_from, date_to)
+        time.sleep(1)
 
-            soup = BeautifulSoup(r.text, "lxml")
+        resp = self._session.post(PROBATE_SEARCH, data=payload, timeout=45)
+        resp.raise_for_status()
+        result_soup = BeautifulSoup(resp.text, "html.parser")
 
-            # Target the exact fields visible on Cleveland's Accela pages:
-            # 1. "Project Description" — e.g. "Vacant and Distressed Property"
-            # 2. "Type of Complaint"   — e.g. "Int/ext for condemnation for ICLB"
-            # 3. "Descriptive nature of complaint" — free-text detail
-            candidate_parts = []
+        rows = self._parse_results(result_soup)
+        log.info("Probate results: %d estate filings", len(rows))
 
-            for label_text in [
-                "Project Description",
-                "Type of Complaint",
-                "Descriptive nature of complaint",
-                "Record Type",
-                "Description",
-            ]:
-                # Find the label element
-                label_el = soup.find(string=re.compile(
-                    r"^\s*" + re.escape(label_text) + r"\s*:?\s*$", re.I
-                ))
-                if not label_el:
-                    # broader search — label may have extra whitespace or be in an element
-                    label_el = soup.find(string=re.compile(label_text, re.I))
+        for row in rows:
+            rec = self._row_to_record(row)
+            if rec:
+                self.raw_records.append(rec)
 
-                if label_el:
-                    parent = label_el.find_parent(["td", "th", "dt", "label", "span", "div"])
-                    if parent:
-                        # Value is typically the next sibling element
-                        nxt = parent.find_next_sibling()
-                        if nxt:
-                            val = nxt.get_text(" ", strip=True)
-                            if val and len(val) < 200:
-                                candidate_parts.append(val)
+    def _build_payload(self, soup: BeautifulSoup,
+                       date_from: date, date_to: date) -> dict:
+        vs = self._get_viewstate(soup)
 
-            candidate_text = " | ".join(p for p in candidate_parts if p)
+        # Detect control-name prefix (PROWARE uses ctl00$ContentPlaceHolder1$ typically)
+        prefix = "ctl00$ContentPlaceHolder1$"
+        if not soup.find("input", {"name": re.compile(r"ctl00\$ContentPlaceHolder1\$")}):
+            prefix = "ContentPlaceHolder1$"
 
-            # Fallback: full visible page text (first 600 chars)
-            if not candidate_text:
-                candidate_text = soup.get_text(" ", strip=True)[:600]
+        fmt = lambda d: d.strftime("%m/%d/%Y")
 
-            # Log every new record at DEBUG; log first few at INFO so you can verify
-            if len(self._cache) < 5:
-                log.info("ACCELA %s → %s", record_id, candidate_text[:250])
-            else:
-                log.debug("Accela %s → %s", record_id, candidate_text[:150])
+        return {
+            **vs,
+            "__EVENTTARGET":                        "",
+            "__EVENTARGUMENT":                      "",
+            f"{prefix}rbSearchMethod":              "Party",
+            f"{prefix}ddlCaseCategory":             "ES",   # ES = Estate
+            f"{prefix}txtLastName":                 "",     # blank = all
+            f"{prefix}txtFirstName":                "",
+            f"{prefix}txtFilingDateFrom":           fmt(date_from),
+            f"{prefix}txtFilingDateTo":             fmt(date_to),
+            f"{prefix}btnSearch":                   "Search",
+        }
 
-            upper = candidate_text.upper()
-            for keyword, (cat, label) in ACCELA_KEYWORDS.items():
-                if keyword in upper:
-                    log.debug("Accela %s matched '%s' → %s", record_id, keyword, label)
-                    return {"cat": cat, "cat_label": label, "viol_desc": candidate_text[:150]}
+    # ------------------------------------------------------------------
+    # Parsing
+    # ------------------------------------------------------------------
 
-            # No keyword matched — cache with raw text so we can expand keywords later
-            log.debug("Accela %s — no keyword match, raw: %s", record_id, candidate_text[:150])
-            return {"cat": "CODE", "cat_label": "Code Violation",
-                    "viol_desc": candidate_text[:150]}
+    def _parse_results(self, soup: BeautifulSoup) -> list[dict]:
+        rows = []
+        table = (
+            soup.find("table", id=re.compile(r"gvResults|GridView|grdResults", re.I))
+            or soup.find("table", class_=re.compile(r"grid|result|case", re.I))
+        )
+        if not table:
+            log.warning("Probate: no results table found — check field prefix or TOS cookie.")
+            return rows
 
-        except Exception as e:
-            log.debug("Accela fetch failed for %s: %s", record_id, e)
+        tr_list = table.find_all("tr")
+        if len(tr_list) < 2:
+            return rows
+
+        headers = [th.get_text(strip=True).lower()
+                   for th in tr_list[0].find_all(["th", "td"])]
+        idx = {
+            "case_no":   self._col(headers, ["case number", "case no", "casenumber"]),
+            "name":      self._col(headers, ["name", "decedent", "party"]),
+            "case_type": self._col(headers, ["case type", "type"]),
+            "filed":     self._col(headers, ["filed", "filing date", "date"]),
+            "status":    self._col(headers, ["status"]),
+        }
+
+        for tr in tr_list[1:]:
+            cells = tr.find_all("td")
+            if not cells:
+                continue
+
+            def cell(key):
+                i = idx.get(key)
+                return cells[i].get_text(strip=True) if i is not None and i < len(cells) else ""
+
+            link_tag = tr.find("a", href=True)
+            detail_href = link_tag["href"] if link_tag else ""
+            if detail_href and not detail_href.startswith("http"):
+                detail_href = f"{PROBATE_BASE}/{detail_href.lstrip('/')}"
+
+            rows.append({
+                "case_no":    cell("case_no"),
+                "name":       cell("name"),
+                "case_type":  cell("case_type"),
+                "filed":      cell("filed"),
+                "status":     cell("status"),
+                "detail_url": detail_href,
+            })
+        return rows
+
+    def _row_to_record(self, row: dict) -> Optional[dict]:
+        raw_name = row["name"].strip()
+        if not raw_name:
             return None
+
+        # Normalise "SMITH, JOHN WILLIAM" → last / first
+        if "," in raw_name:
+            last, _, first = raw_name.partition(",")
+        else:
+            parts = raw_name.split()
+            last  = parts[-1] if parts else raw_name
+            first = " ".join(parts[:-1])
+
+        last  = last.strip().upper()
+        first = first.strip().upper()
+
+        # Use decedent name as owner proxy for parcel enrichment
+        owner = f"{last}, {first}" if first else last
+
+        return {
+            "doc_num":      row["case_no"] or f"PRO-{raw_name[:20]}",
+            "doc_type":     "PRO",
+            "cat":          "PRO",
+            "cat_label":    "Probate / Estate",
+            "filed":        row["filed"],
+            "owner":        owner,          # decedent name → MyPlace owner search
+            "grantee":      "",
+            "amount":       None,
+            "legal":        "",             # filled by parcel enrichment
+            "clerk_url":    row["detail_url"] or PROBATE_SEARCH,
+            "prop_address": "",
+            "prop_city":    "Cleveland",
+            "prop_state":   "OH",
+            "prop_zip":     "",
+            "mail_address": "",
+            "mail_city":    "",
+            "mail_state":   "OH",
+            "mail_zip":     "",
+            "source":       "Cuyahoga Probate Court",
+            "neighborhood": "",
+            "viol_status":  row["status"],
+            "viol_desc":    "",
+            "viol_severity": "",
+            # Extra PRO fields (visible in dashboard / CSV)
+            "pro_case_no":  row["case_no"],
+            "pro_decedent": raw_name,
+            "pro_status":   row["status"],
+        }
+
+    # ------------------------------------------------------------------
+    # Utilities
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _get_viewstate(soup: BeautifulSoup) -> dict:
+        fields = {}
+        for name in ("__VIEWSTATE", "__VIEWSTATEGENERATOR", "__EVENTVALIDATION"):
+            tag = soup.find("input", {"name": name})
+            if tag:
+                fields[name] = tag.get("value", "")
+        return fields
+
+    @staticmethod
+    def _col(headers: list, candidates: list) -> Optional[int]:
+        for c in candidates:
+            for i, h in enumerate(headers):
+                if c in h:
+                    return i
+        return None
 
 
 # ===========================================================================
@@ -832,30 +880,23 @@ class ParcelLookup:
         self._by_parcel  = {}
         self._by_address = {}
         self._session    = None
-        self._working_url = None
 
     def load(self):
         self._session = requests.Session()
         self._session.verify = False
         self._session.headers.update({"User-Agent": "CuyahogaLeadScraper/1.0"})
-
         try:
             r = self._session.get(self.MYPLACE_URL, params={
                 "where": "parcelpin='703010013'",
                 "outFields": "parcelpin,parcel_owner,par_addr_all",
                 "f": "json",
                 "resultRecordCount": 1,
-                "returnGeometry": "false"
+                "returnGeometry": "false",
             }, timeout=15)
             if r.status_code == 200 and r.json().get("features"):
-                self._working_url = self.MYPLACE_URL
-                log.info("MyPlace API working: %s", self._working_url)
+                log.info("MyPlace API working.")
         except Exception as e:
             log.debug("MyPlace test failed: %s", e)
-
-        if not self._working_url:
-            self._working_url = self.MYPLACE_URL
-            log.info("Using MyPlace URL as fallback: %s", self._working_url)
 
     def enrich_records(self, records: list) -> int:
         if not self._session:
@@ -864,93 +905,143 @@ class ParcelLookup:
         for rec in records:
             parcel = rec.get("legal", "")
             if not parcel:
+                # PRO records have no parcel yet — try owner-name lookup
+                if rec.get("cat") == "PRO" and rec.get("owner"):
+                    match = self._owner_name_lookup(rec["owner"])
+                    if match:
+                        self._apply_match(rec, match)
+                        enriched += 1
                 continue
             match = self._api_lookup_parcel(parcel)
             if match:
-                if not rec.get("prop_address") and match.get("site_addr"):
-                    rec["prop_address"] = match["site_addr"]
-                    rec["prop_city"]    = match.get("site_city") or "Cleveland"
-                    rec["prop_zip"]     = match.get("site_zip", "")
-                if match.get("mail_addr"):
-                    rec["mail_address"] = match["mail_addr"]
-                    rec["mail_city"]    = match.get("mail_city", "")
-                    rec["mail_state"]   = match.get("mail_state") or "OH"
-                    rec["mail_zip"]     = match.get("mail_zip", "")
-                if not rec.get("owner") and match.get("owner"):
-                    rec["owner"] = match["owner"]
-                rec["delinquent"]   = match.get("delinquent", False)
-                rec["delinq_amt"]   = match.get("delinq_amt", "")
-                rec["homestead"]    = match.get("homestead", False)
-                rec["appraised"]    = match.get("appraised", "")
-                rec["out_of_state"] = match.get("out_of_state", False)
-                rec["luc"]          = match.get("luc", "")
-                rec["luc_desc"]     = match.get("luc_desc", "")
+                self._apply_match(rec, match)
                 enriched += 1
             time.sleep(0.3)
         return enriched
+
+    def _apply_match(self, rec: dict, match: dict):
+        if not rec.get("prop_address") and match.get("site_addr"):
+            rec["prop_address"] = match["site_addr"]
+            rec["prop_city"]    = match.get("site_city") or "Cleveland"
+            rec["prop_zip"]     = match.get("site_zip", "")
+        if match.get("mail_addr"):
+            rec["mail_address"] = match["mail_addr"]
+            rec["mail_city"]    = match.get("mail_city", "")
+            rec["mail_state"]   = match.get("mail_state") or "OH"
+            rec["mail_zip"]     = match.get("mail_zip", "")
+        if not rec.get("owner") and match.get("owner"):
+            rec["owner"] = match["owner"]
+        if not rec.get("legal") and match.get("parcel"):
+            rec["legal"] = match["parcel"]
+        rec["delinquent"]   = match.get("delinquent", False)
+        rec["delinq_amt"]   = match.get("delinq_amt", "")
+        rec["homestead"]    = match.get("homestead", False)
+        rec["appraised"]    = match.get("appraised", "")
+        rec["out_of_state"] = match.get("out_of_state", False)
+        rec["luc"]          = match.get("luc", "")
+        rec["luc_desc"]     = match.get("luc_desc", "")
+
+    def _owner_name_lookup(self, owner_name: str) -> Optional[dict]:
+        """Name-based parcel lookup for PRO records where we have no parcel number yet."""
+        if not self._session:
+            return None
+        try:
+            # Try each name variant (SMITH JOHN / JOHN SMITH)
+            for variant in name_variants(owner_name):
+                url = (
+                    f"https://myplace.cuyahogacounty.gov/MyPlaceService.svc/"
+                    f"ParcelsAndValuesByAnySearchByAndCity/"
+                    f"{requests.utils.quote(variant)}?city=99&searchBy=Owner"
+                )
+                r = self._session.get(url, timeout=15)
+                if r.status_code != 200:
+                    continue
+                import json as _json
+                raw = r.text.strip()
+                try:
+                    data = _json.loads(raw)
+                    if isinstance(data, str):
+                        data = _json.loads(data)
+                except Exception:
+                    continue
+                if not data or not data[0]:
+                    continue
+                attrs = data[0][0] if isinstance(data[0], list) else data[0]
+                result = self._attrs_to_match(attrs)
+                if result:
+                    log.info("Probate parcel match: %s → %s",
+                             owner_name, result.get("site_addr", ""))
+                    return result
+        except Exception as e:
+            log.debug("Owner name lookup failed for %s: %s", owner_name, e)
+        return None
 
     def _api_lookup_parcel(self, parcel: str) -> Optional[dict]:
         if not self._session:
             return None
         try:
             log.info("Parcel API lookup: %s", parcel)
-            url = f"https://myplace.cuyahogacounty.gov/MyPlaceService.svc/ParcelsAndValuesByAnySearchByAndCity/{parcel}?city=99&searchBy=Parcel"
+            url = (
+                f"https://myplace.cuyahogacounty.gov/MyPlaceService.svc/"
+                f"ParcelsAndValuesByAnySearchByAndCity/{parcel}?city=99&searchBy=Parcel"
+            )
             r = self._session.get(url, timeout=15)
             if r.status_code != 200:
                 log.warning("Parcel API HTTP %d for %s", r.status_code, parcel)
                 return None
-
-            # WCF returns a JSON string inside a JSON string — handle both cases
             import json as _json
             raw = r.text.strip()
             try:
                 data = _json.loads(raw)
                 if isinstance(data, str):
-                    data = _json.loads(data)  # double-encoded
+                    data = _json.loads(data)
             except Exception as e:
                 log.warning("Parcel JSON parse failed for %s: %s | raw: %s",
                             parcel, e, raw[:200])
                 return None
-
             if not data or not data[0]:
                 return None
-
             attrs = data[0][0] if isinstance(data[0], list) else data[0]
-            owner     = normalize_name(attrs.get("DEEDED_OWNER") or "")
-            site_addr = (attrs.get("PHYSICAL_ADDRESS") or "").strip().title()
-            city      = (attrs.get("PARCEL_CITY") or "Cleveland").strip().title()
-            zipcode   = str(attrs.get("PARCEL_ZIP") or "")
-            rec = {
-                "owner":        owner,
-                "site_addr":    site_addr,
-                "site_city":    city,
-                "site_zip":     zipcode,
-                "mail_addr":    "",
-                "mail_city":    "",
-                "mail_state":   "OH",
-                "mail_zip":     "",
-                "parcel":       parcel,
-                "delinquent":   False,
-                "delinq_amt":   "",
-                "homestead":    False,
-                "appraised":    str(attrs.get("CERTIFIED_TAX_TOTAL") or ""),
-                "out_of_state": False,
-                "luc":          "",
-                "luc_desc":     "",
-            }
-            if owner or site_addr:
-                self._by_parcel[parcel] = rec
-                log.info("Parcel enriched: %s -> %s, %s", parcel, site_addr, city)
-                return rec
-            return None
-
+            result = self._attrs_to_match(attrs)
+            if result:
+                self._by_parcel[parcel] = result
+                log.info("Parcel enriched: %s -> %s, %s",
+                         parcel, result.get("site_addr", ""), result.get("site_city", ""))
+            return result
         except Exception as e:
             log.warning("MyPlace WCF lookup failed for %s: %s", parcel, e)
         return None
 
+    @staticmethod
+    def _attrs_to_match(attrs: dict) -> Optional[dict]:
+        owner     = normalize_name(attrs.get("DEEDED_OWNER") or "")
+        site_addr = (attrs.get("PHYSICAL_ADDRESS") or "").strip().title()
+        city      = (attrs.get("PARCEL_CITY") or "Cleveland").strip().title()
+        zipcode   = str(attrs.get("PARCEL_ZIP") or "")
+        parcel    = (attrs.get("PARCEL_NUMBER") or attrs.get("PIN") or "")
+        if not (owner or site_addr):
+            return None
+        return {
+            "owner":        owner,
+            "site_addr":    site_addr,
+            "site_city":    city,
+            "site_zip":     zipcode,
+            "mail_addr":    "",
+            "mail_city":    "",
+            "mail_state":   "OH",
+            "mail_zip":     "",
+            "parcel":       parcel,
+            "delinquent":   False,
+            "delinq_amt":   "",
+            "homestead":    False,
+            "appraised":    str(attrs.get("CERTIFIED_TAX_TOTAL") or ""),
+            "out_of_state": False,
+            "luc":          "",
+            "luc_desc":     "",
+        }
+
     def _lookup_luc(self, parcel: str) -> str:
         return ""
-
 
 
 # ===========================================================================
@@ -983,7 +1074,7 @@ class LeadScorer:
                 points += 5
         if cat == "CONDEMN": flags.append("Condemned property"); points += 20
         if cat == "LIEN":
-            if dtype in ("LNIRS","LNFED","LNCORPTX"): flags.append("Tax lien")
+            if dtype in ("LNIRS", "LNFED", "LNCORPTX"): flags.append("Tax lien")
             elif dtype == "LNMECH": flags.append("Mechanic lien")
             elif dtype == "LNHOA":  flags.append("HOA lien")
             else: flags.append("Lien")
@@ -994,10 +1085,10 @@ class LeadScorer:
         norm = normalize_name(owner)
         if norm:
             owner_cats = {r["cat"] for r in all_recs
-                          if normalize_name(r.get("owner","")) == norm}
-            if "LP" in owner_cats and owner_cats & {"NOFC","TAXDEED"}:
+                          if normalize_name(r.get("owner", "")) == norm}
+            if "LP" in owner_cats and owner_cats & {"NOFC", "TAXDEED"}:
                 points += 20
-            if owner_cats & {"NOFC","LP"} and owner_cats & {"CODE","CONDEMN"}:
+            if owner_cats & {"NOFC", "LP"} and owner_cats & {"CODE", "CONDEMN"}:
                 flags.append("Foreclosure + violation"); points += 25
 
         if amt:
@@ -1005,7 +1096,7 @@ class LeadScorer:
             elif amt > 50_000: points += 10
 
         try:
-            dt = datetime.strptime(rec.get("filed","").strip(), "%m/%d/%Y")
+            dt = datetime.strptime(rec.get("filed", "").strip(), "%m/%d/%Y")
             if dt >= LeadScorer.WEEK_AGO:
                 flags.append("New this week"); points += 5
         except Exception:
@@ -1028,17 +1119,21 @@ class LeadScorer:
 
 
 # ===========================================================================
-# GHL CSV
+# GHL CSV Export
 # ===========================================================================
 
 GHL_COLS = [
-    "First Name","Last Name","Mailing Address","Mailing City","Mailing State","Mailing Zip",
-    "Property Address","Property City","Property State","Property Zip",
-    "Lead Type","Document Type","Date Filed","Document Number","Amount/Debt Owed",
-    "Seller Score","Motivated Seller Flags","Source","Public Records URL",
-    "Parcel Number","Appraised Value","Delinquent Taxes","Delinquent Amount",
-    "Homestead Exemption","Out-of-State Owner","Neighborhood","Violation Status",
-    "Violation Description","Violation Severity",
+    "First Name", "Last Name", "Mailing Address", "Mailing City",
+    "Mailing State", "Mailing Zip",
+    "Property Address", "Property City", "Property State", "Property Zip",
+    "Lead Type", "Document Type", "Date Filed", "Document Number",
+    "Amount/Debt Owed", "Seller Score", "Motivated Seller Flags",
+    "Source", "Public Records URL", "Parcel Number", "Appraised Value",
+    "Delinquent Taxes", "Delinquent Amount", "Homestead Exemption",
+    "Out-of-State Owner", "Neighborhood", "Violation Status",
+    "Violation Description", "Violation Severity",
+    # PRO-specific columns
+    "Probate Case No", "Decedent Name", "Estate Status",
 ]
 
 def split_name(n):
@@ -1052,46 +1147,51 @@ def split_name(n):
 def export_csv(records: list, path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=GHL_COLS)
+        w = csv.DictWriter(f, fieldnames=GHL_COLS, extrasaction="ignore")
         w.writeheader()
         for r in records:
             fn, ln = split_name(r.get("owner", ""))
             amt = r.get("amount")
             w.writerow({
-                "First Name": fn, "Last Name": ln,
-                "Mailing Address":   r.get("mail_address", ""),
-                "Mailing City":      r.get("mail_city", ""),
-                "Mailing State":     r.get("mail_state", "OH"),
-                "Mailing Zip":       r.get("mail_zip", ""),
-                "Property Address":  r.get("prop_address", ""),
-                "Property City":     r.get("prop_city", "Cleveland"),
-                "Property State":    r.get("prop_state", "OH"),
-                "Property Zip":      r.get("prop_zip", ""),
-                "Lead Type":         r.get("cat_label", ""),
-                "Document Type":     r.get("doc_type", ""),
-                "Date Filed":        r.get("filed", ""),
-                "Document Number":   r.get("doc_num", ""),
-                "Amount/Debt Owed":  f"${amt:,.2f}" if amt else "",
-                "Seller Score":      r.get("score", 0),
+                "First Name":             fn,
+                "Last Name":              ln,
+                "Mailing Address":        r.get("mail_address", ""),
+                "Mailing City":           r.get("mail_city", ""),
+                "Mailing State":          r.get("mail_state", "OH"),
+                "Mailing Zip":            r.get("mail_zip", ""),
+                "Property Address":       r.get("prop_address", ""),
+                "Property City":          r.get("prop_city", "Cleveland"),
+                "Property State":         r.get("prop_state", "OH"),
+                "Property Zip":           r.get("prop_zip", ""),
+                "Lead Type":              r.get("cat_label", ""),
+                "Document Type":          r.get("doc_type", ""),
+                "Date Filed":             r.get("filed", ""),
+                "Document Number":        r.get("doc_num", ""),
+                "Amount/Debt Owed":       f"${amt:,.2f}" if amt else "",
+                "Seller Score":           r.get("score", 0),
                 "Motivated Seller Flags": "; ".join(r.get("flags", [])),
-                "Source":            r.get("source", "Court Docket"),
-                "Public Records URL": r.get("clerk_url", ""),
-                "Parcel Number":     r.get("legal", ""),
-                "Appraised Value":   r.get("appraised", ""),
-                "Delinquent Taxes":  "Yes" if r.get("delinquent") else "No",
-                "Delinquent Amount": r.get("delinq_amt", ""),
-                "Homestead Exemption": "Yes" if r.get("homestead") else "No",
-                "Out-of-State Owner": "Yes" if r.get("out_of_state") else "No",
-                "Neighborhood":      r.get("neighborhood", ""),
-                "Violation Status":  r.get("viol_status", ""),
-                "Violation Description": r.get("viol_desc", ""),
-                "Violation Severity": r.get("viol_severity", "").title(),
+                "Source":                 r.get("source", ""),
+                "Public Records URL":     r.get("clerk_url", ""),
+                "Parcel Number":          r.get("legal", ""),
+                "Appraised Value":        r.get("appraised", ""),
+                "Delinquent Taxes":       "Yes" if r.get("delinquent") else "No",
+                "Delinquent Amount":      r.get("delinq_amt", ""),
+                "Homestead Exemption":    "Yes" if r.get("homestead") else "No",
+                "Out-of-State Owner":     "Yes" if r.get("out_of_state") else "No",
+                "Neighborhood":           r.get("neighborhood", ""),
+                "Violation Status":       r.get("viol_status", ""),
+                "Violation Description":  r.get("viol_desc", ""),
+                "Violation Severity":     r.get("viol_severity", "").title(),
+                # PRO-specific
+                "Probate Case No":        r.get("pro_case_no", ""),
+                "Decedent Name":          r.get("pro_decedent", ""),
+                "Estate Status":          r.get("pro_status", ""),
             })
     log.info("GHL CSV: %d rows -> %s", len(records), path)
 
 
 # ===========================================================================
-# Save
+# Save JSON
 # ===========================================================================
 
 def save_json(data: dict, *paths: Path):
@@ -1118,9 +1218,13 @@ def save_json(data: dict, *paths: Path):
                 seen[key] = rec
         merged = sorted(seen.values(), key=lambda r: r.get("score", 0), reverse=True)
 
-        output = {**data, "records": merged, "total": len(merged),
-                  "with_address": sum(1 for r in merged
-                                      if r.get("prop_address") or r.get("mail_address"))}
+        output = {
+            **data,
+            "records":      merged,
+            "total":        len(merged),
+            "with_address": sum(1 for r in merged
+                                if r.get("prop_address") or r.get("mail_address")),
+        }
         with open(path, "w", encoding="utf-8") as f:
             json.dump(output, f, indent=2, default=str)
         log.info("Saved %s (%d records)", path, len(merged))
@@ -1130,72 +1234,66 @@ def save_json(data: dict, *paths: Path):
 # Main
 # ===========================================================================
 
+EXCLUDE_KEYWORDS = {
+    "CONDO", "CONDOMINIUM", "APARTMENTS", "APT", "COMMERCIAL",
+    "INDUSTRIAL", "WAREHOUSE", "RETAIL", "OFFICE", "PLAZA",
+    "SHOPPING", "CHURCH", "SCHOOL", "HOSPITAL", "UNIVERSITY",
+    "LLC PORTFOLIO", "HOLDINGS LLC",
+}
+
+def is_sfh_or_land(rec: dict) -> bool:
+    addr  = (rec.get("prop_address") or "").upper()
+    owner = (rec.get("owner") or "").upper()
+    legal = (rec.get("legal_desc") or rec.get("legal") or "").upper()
+    combined = f"{addr} {owner} {legal}"
+    return not any(kw in combined for kw in EXCLUDE_KEYWORDS)
+
+
 async def main():
     log.info("=" * 60)
-    log.info("Cuyahoga County Lead Scraper — Court Docket + Code Violations")
-    log.info("Range: %s -> %s",
-             (datetime.now() - timedelta(days=LOOKBACK_DAYS)).strftime("%m/%d/%Y"),
-             datetime.now().strftime("%m/%d/%Y"))
+    log.info("Cuyahoga County Lead Scraper — NOFC + CODE + CONDEMN + PRO")
+    log.info("Lookback: %d days", LOOKBACK_DAYS)
     log.info("=" * 60)
 
-    # 1. Load parcel lookup
+    # 1. Parcel lookup
     parcel = ParcelLookup()
     log.info("Loading parcel data ...")
     parcel.load()
 
-    # 2. Scrape sheriff sales
-    scraper = SheriffScraper()
-    await scraper.run()
-    records = list(scraper.raw_records)
+    # 2. Sheriff sales  (NOFC)
+    sheriff = SheriffScraper()
+    await sheriff.run()
+    records = list(sheriff.raw_records)
     log.info("Sheriff sale records: %d", len(records))
 
-    # 3. Scrape code violations + condemnations
-    code_scraper = CodeViolationScraper()
-    code_scraper.run()
-    records.extend(code_scraper.raw_records)
-    log.info("Total records after adding violations: %d", len(records))
+    # 3. Code violations + condemnations  (CODE / CONDEMN)
+    code = CodeViolationScraper()
+    code.run()
+    records.extend(code.raw_records)
+    log.info("Total after violations: %d", len(records))
 
-    # 3b. Accela violation type scraper disabled — pages are JS-rendered,
-    # BeautifulSoup only gets the login nav bar. Re-enable if Playwright added.
-    # accela = AccelaScraper()
-    # accela.load_cache()
-    # accela.enrich_violations(records)
+    # 4. Probate estates  (PRO)
+    probate = ProbateScraper()
+    probate.run()
+    records.extend(probate.raw_records)
+    log.info("Total after probate: %d", len(records))
 
-    # 4. Enrich all records with parcel owner/address data
+    # 5. Parcel enrichment
     log.info("Enriching records with parcel data ...")
     enriched = parcel.enrich_records(records)
     log.info("Enriched %d/%d records with parcel data", enriched, len(records))
 
-    # 4b. Filter to SFH + Vacant Land using available signals
-    # LUC not available from these endpoints — infer from description and owner signals
-    EXCLUDE_KEYWORDS = {
-        "CONDO", "CONDOMINIUM", "APARTMENTS", "APT", "COMMERCIAL",
-        "INDUSTRIAL", "WAREHOUSE", "RETAIL", "OFFICE", "PLAZA",
-        "SHOPPING", "CHURCH", "SCHOOL", "HOSPITAL", "UNIVERSITY",
-        "LLC PORTFOLIO", "HOLDINGS LLC",
-    }
-    def is_sfh_or_land(rec: dict) -> bool:
-        # Always keep if no address info to filter on
-        addr  = (rec.get("prop_address") or "").upper()
-        owner = (rec.get("owner") or "").upper()
-        legal = (rec.get("legal_desc") or rec.get("legal") or "").upper()
-        combined = f"{addr} {owner} {legal}"
-        # Exclude known non-SFH keywords
-        if any(kw in combined for kw in EXCLUDE_KEYWORDS):
-            return False
-        return True
-
-    before_sfh = len(records)
+    # 6. SFH + Land filter
+    before = len(records)
     records = [r for r in records if is_sfh_or_land(r)]
     log.info("SFH+Land filter: %d → %d records (removed %d non-qualifying)",
-             before_sfh, len(records), before_sfh - len(records))
+             before, len(records), before - len(records))
 
-    # 5. Score all records
+    # 7. Score
     for rec in records:
         rec["score"], rec["flags"] = LeadScorer.score(rec, records)
 
-    # 5b. Parcel cross-reference — boost records where same parcel has multiple hit types
-    # Normalize all parcel numbers to digits-only for reliable matching
+    # 8. Cross-reference boost (foreclosure + violation on same parcel)
     def norm_parcel(p: str) -> str:
         return re.sub(r"[^0-9]", "", p or "")
 
@@ -1218,7 +1316,6 @@ async def main():
                     rec["flags"].insert(0, "🔥 Foreclosure + violation")
                 rec["score"] = min(100, rec["score"] + 25)
         elif len(cats) > 1:
-            # Multiple violation types on same parcel — smaller boost
             for rec in parcel_recs[p]:
                 if "Multi-hit parcel" not in rec["flags"]:
                     rec["flags"].append("Multi-hit parcel")
@@ -1226,7 +1323,7 @@ async def main():
 
     log.info("Cross-reference: %d parcels with foreclosure + violation", multi_hit_parcels)
 
-    # 6. Deduplicate
+    # 9. Deduplicate
     seen = {}
     for rec in records:
         key = rec.get("doc_num") or rec.get("clerk_url") or str(id(rec))
@@ -1235,11 +1332,11 @@ async def main():
     records = sorted(seen.values(), key=lambda r: r["score"], reverse=True)
     log.info("Unique records after dedup: %d", len(records))
 
-    # 7. Save
+    # 10. Save
     with_addr = sum(1 for r in records if r.get("prop_address") or r.get("mail_address"))
     output = {
         "fetched_at": datetime.now(timezone.utc).isoformat(),
-        "source":     "Cuyahoga County Court Docket + Code Violations + Manual Uploads",
+        "source":     "Cuyahoga Court Docket + Code Violations + Probate + Manual Uploads",
         "date_range": {
             "from": (datetime.now() - timedelta(days=LOOKBACK_DAYS)).strftime("%m/%d/%Y"),
             "to":   datetime.now().strftime("%m/%d/%Y"),
