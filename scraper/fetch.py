@@ -723,24 +723,34 @@ class ProbateScraper:
                        date_from: date, date_to: date) -> dict:
         vs = self._get_viewstate(soup)
 
-        # Detect control-name prefix (PROWARE uses ctl00$ContentPlaceHolder1$ typically)
-        prefix = "ctl00$ContentPlaceHolder1$"
-        if not soup.find("input", {"name": re.compile(r"ctl00\$ContentPlaceHolder1\$")}):
-            prefix = "ContentPlaceHolder1$"
+        # Confirmed prefix from DevTools: input#mpContentPH_btnSearchByCase
+        # → name attribute uses "mpContentPH$" prefix
+        prefix = "mpContentPH$"
 
         fmt = lambda d: d.strftime("%m/%d/%Y")
 
+        # The form has two sections:
+        #   "Search by Case"  → btnSearchByCase
+        #   "Search by Party" → btnSearchByParty
+        # We use Party search with blank names + date range to get all estate filings.
+        # Case Category dropdown for Party section is ddlCaseCategoryParty (separate from
+        # the Case section's ddlCaseCategory).
         return {
             **vs,
-            "__EVENTTARGET":                        "",
-            "__EVENTARGUMENT":                      "",
-            f"{prefix}rbSearchMethod":              "Party",
-            f"{prefix}ddlCaseCategory":             "ES",   # ES = Estate
-            f"{prefix}txtLastName":                 "",     # blank = all
-            f"{prefix}txtFirstName":                "",
-            f"{prefix}txtFilingDateFrom":           fmt(date_from),
-            f"{prefix}txtFilingDateTo":             fmt(date_to),
-            f"{prefix}btnSearch":                   "Search",
+            "__EVENTTARGET":                            "",
+            "__EVENTARGUMENT":                          "",
+            # Party search fields
+            f"{prefix}rblPartyType":                    "P",      # P=Person, C=Company
+            f"{prefix}txtFirstName":                    "",       # blank = wildcard
+            f"{prefix}txtMiddleName":                   "",
+            f"{prefix}txtLastName":                     "",
+            f"{prefix}ddlSuffix":                       "",
+            f"{prefix}ddlPartyRole":                    "",
+            f"{prefix}txtCaseYearParty":                "",
+            f"{prefix}ddlCaseCategoryParty":            "ES",     # ES = Estate
+            f"{prefix}txtFilingDateFrom":               fmt(date_from),
+            f"{prefix}txtFilingDateTo":                 fmt(date_to),
+            f"{prefix}btnSearchByParty":                "Search By Party",
         }
 
     # ------------------------------------------------------------------
@@ -749,12 +759,24 @@ class ProbateScraper:
 
     def _parse_results(self, soup: BeautifulSoup) -> list[dict]:
         rows = []
+
+        # Try specific IDs first, then class patterns, then any data table
         table = (
-            soup.find("table", id=re.compile(r"gvResults|GridView|grdResults", re.I))
-            or soup.find("table", class_=re.compile(r"grid|result|case", re.I))
+            soup.find("table", id=re.compile(r"gvResults|GridView|grdResults|mpContentPH|SearchResult", re.I))
+            or soup.find("table", class_=re.compile(r"grid|result|case|SearchResult", re.I))
         )
         if not table:
-            log.warning("Probate: no results table found — check field prefix or TOS cookie.")
+            # Last resort: pick the largest table with a header-like first row
+            best, best_rows = None, 0
+            for t in soup.find_all("table"):
+                trs = t.find_all("tr")
+                if len(trs) > best_rows and t.find("td"):
+                    best, best_rows = t, len(trs)
+            table = best
+
+        if not table or len(table.find_all("tr")) < 2:
+            preview = soup.get_text(" ", strip=True)[:400]
+            log.warning("Probate: no results table found. Page preview: %s", preview)
             return rows
 
         tr_list = table.find_all("tr")
