@@ -711,6 +711,12 @@ class ProbateScraper:
         resp.raise_for_status()
         result_soup = BeautifulSoup(resp.text, "html.parser")
 
+        # Debug: log page title and first 300 chars so we can verify it's a results page
+        title = result_soup.find("title")
+        log.info("Probate POST response — title: %s | preview: %s",
+                 title.get_text(strip=True) if title else "none",
+                 result_soup.get_text(" ", strip=True)[:300])
+
         rows = self._parse_results(result_soup)
         log.info("Probate results: %d estate filings", len(rows))
 
@@ -735,10 +741,21 @@ class ProbateScraper:
         # We use Party search with blank names + date range to get all estate filings.
         # Case Category dropdown for Party section is ddlCaseCategoryParty (separate from
         # the Case section's ddlCaseCategory).
+        # PROWARE requires __EVENTTARGET set to the button's full dotted control path.
+        # The button name is "mpContentPH$btnSearchByParty" so the event target
+        # uses dollar-sign → dot notation: "mpContentPH.btnSearchByParty"
+        # We also need to include ALL form fields (Case section too) to avoid
+        # the server ignoring the POST and re-rendering the default page.
+        btn_event_target = f"{prefix}btnSearchByParty".replace("$", "$")
+
         return {
             **vs,
-            "__EVENTTARGET":                            "",
+            "__EVENTTARGET":                            f"{prefix}btnSearchByParty",
             "__EVENTARGUMENT":                          "",
+            # Case search section (must be present even though we use Party search)
+            f"{prefix}txtCaseYear":                     "",
+            f"{prefix}ddlCaseCategory":                 "",
+            f"{prefix}txtCaseNumber":                   "",
             # Party search fields
             f"{prefix}rblPartyType":                    "P",      # P=Person, C=Company
             f"{prefix}txtFirstName":                    "",       # blank = wildcard
@@ -750,7 +767,7 @@ class ProbateScraper:
             f"{prefix}ddlCaseCategoryParty":            "ES",     # ES = Estate
             f"{prefix}txtFilingDateFrom":               fmt(date_from),
             f"{prefix}txtFilingDateTo":                 fmt(date_to),
-            f"{prefix}btnSearchByParty":                "Search By Party",
+            # Do NOT include btnSearchByParty as a form value when using __EVENTTARGET
         }
 
     # ------------------------------------------------------------------
