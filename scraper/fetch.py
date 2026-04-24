@@ -932,17 +932,12 @@ class ProbateScraper:
 
     def _make_session(self):
         import requests as _req
-        from http.cookiejar import CookieJar
         session = _req.Session()
         session.verify = True
         session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,*/*",
         })
-        # Pre-set the CUPR_WEBDOCKET cookie that PROWARE uses as a TOS gate.
-        # We set it manually to avoid requests rejecting the malformed Set-Cookie header.
-        session.cookies.set("CUPR_WEBDOCKET", "1",
-                            domain="probate.cuyahogacounty.gov", path="/")
         resp = session.get(PROBATE_TOS, timeout=30)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -993,24 +988,32 @@ class ProbateScraper:
                 break
         log.info("Probate prefix detected: '%s'", prefix)
 
-        payload = {
-            **vs,
-            "__EVENTTARGET":                   f"{prefix}btnSearchByParty",
-            "__EVENTARGUMENT":                 "",
-            f"{prefix}txtCaseYear":            "",
-            f"{prefix}ddlCaseCategory":        "",
-            f"{prefix}txtCaseNumber":          "",
-            f"{prefix}rblPartyType":           "P",
-            f"{prefix}txtFirstName":           "",
-            f"{prefix}txtMiddleName":          "",
-            f"{prefix}txtLastName":            "",
-            f"{prefix}ddlSuffix":              "",
-            f"{prefix}ddlPartyRole":           "",
-            f"{prefix}txtCaseYearParty":       "",
-            f"{prefix}ddlCaseCategoryParty":   "ES",
-            f"{prefix}txtFilingDateFrom":      fmt(date_from),
-            f"{prefix}txtFilingDateTo":        fmt(date_to),
-        }
+        # Scrape ALL form fields from the page so the POST is complete.
+        # Sending incomplete payloads causes PROWARE 500 errors.
+        payload = {"__EVENTTARGET": f"{prefix}btnSearchByParty",
+                   "__EVENTARGUMENT": ""}
+        for inp in soup.find_all("input"):
+            n = inp.get("name", "")
+            v = inp.get("value", "")
+            if n and n not in ("__EVENTTARGET", "__EVENTARGUMENT"):
+                payload[n] = v
+        for sel_tag in soup.find_all("select"):
+            n = sel_tag.get("name", "")
+            if n:
+                selected = sel_tag.find("option", selected=True)
+                payload[n] = selected["value"] if selected else ""
+        # Override with our Estate party search parameters
+        payload[f"{prefix}rblPartyType"]         = "P"
+        payload[f"{prefix}txtFirstName"]         = ""
+        payload[f"{prefix}txtMiddleName"]        = ""
+        payload[f"{prefix}txtLastName"]          = ""
+        payload[f"{prefix}txtCaseYearParty"]     = ""
+        payload[f"{prefix}ddlCaseCategoryParty"] = "ES"
+        payload[f"{prefix}txtFilingDateFrom"]    = fmt(date_from)
+        payload[f"{prefix}txtFilingDateTo"]      = fmt(date_to)
+        payload[f"{prefix}txtCaseYear"]          = ""
+        payload[f"{prefix}txtCaseNumber"]        = ""
+        payload[f"{prefix}ddlCaseCategory"]      = ""
         log.info("Probate POST payload: %s", payload)
         time.sleep(1)
 
