@@ -948,7 +948,7 @@ class ProbateScraper:
         if not vs.get("__VIEWSTATE"):
             log.warning("Probate: no ViewState on TOS page — skipping")
             return None
-btn = soup.find("input", {"type": "submit"})
+        btn = soup.find("input", {"type": "submit"})
         btn_name  = btn["name"]  if btn else "btnAccept"
         btn_value = btn["value"] if btn else "I Accept"
         session.cookies.set("CUPR_WEBDOCKET", "1",
