@@ -932,12 +932,17 @@ class ProbateScraper:
 
     def _make_session(self):
         import requests as _req
+        from http.cookiejar import CookieJar
         session = _req.Session()
         session.verify = True
         session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,*/*",
         })
+        # Pre-set the CUPR_WEBDOCKET cookie that PROWARE uses as a TOS gate.
+        # We set it manually to avoid requests rejecting the malformed Set-Cookie header.
+        session.cookies.set("CUPR_WEBDOCKET", "1",
+                            domain="probate.cuyahogacounty.gov", path="/")
         resp = session.get(PROBATE_TOS, timeout=30)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -951,8 +956,6 @@ class ProbateScraper:
         btn = soup.find("input", {"type": "submit"})
         btn_name  = btn["name"]  if btn else "btnAccept"
         btn_value = btn["value"] if btn else "I Accept"
-        session.cookies.set("CUPR_WEBDOCKET", "1",
-                            domain="probate.cuyahogacounty.gov", path="/pa")
         resp = session.post(PROBATE_TOS, timeout=30, data={
             **vs,
             "__EVENTTARGET": "", "__EVENTARGUMENT": "",
