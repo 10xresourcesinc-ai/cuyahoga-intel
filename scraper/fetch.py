@@ -904,7 +904,209 @@ class ProbateScraper:
                     return i
         return None
 
+# ===========================================================================
+# Probate Court Scraper  (PRO)  — Phase 3
+# ===========================================================================
 
+PROBATE_BASE   = "https://probate.cuyahogacounty.gov/pa"
+PROBATE_TOS    = f"{PROBATE_BASE}/TOS.aspx"
+PROBATE_SEARCH = f"{PROBATE_BASE}/CaseSearch.aspx"
+
+from datetime import date as _date
+
+class ProbateScraper:
+
+    def __init__(self):
+        self.raw_records: list[dict] = []
+        self._session = None
+
+    def run(self):
+        log.info("Scraping Cuyahoga Probate Court estate filings ...")
+        try:
+            self._session = self._make_session()
+            if self._session:
+                self._search_estates()
+        except Exception as e:
+            log.warning("Probate scraper failed: %s", e)
+        log.info("Probate estates: %d records", len(self.raw_records))
+
+    def _make_session(self):
+        import requests as _req
+        session = _req.Session()
+        session.verify = True
+        session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,*/*",
+        })
+        resp = session.get(PROBATE_TOS, timeout=30)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+        vs = {n: (soup.find("input", {"name": n}) or {}).get("value", "")
+              for n in ("__VIEWSTATE", "__VIEWSTATEGENERATOR", "__EVENTVALIDATION")}
+        log.info("Probate TOS cookies: %s | ViewState present: %s",
+                 dict(session.cookies), bool(vs.get("__VIEWSTATE")))
+        if not vs.get("__VIEWSTATE"):
+            log.warning("Probate: no ViewState on TOS page — skipping")
+            return None
+        btn = soup.find("input", {"type": "submit"})
+        btn_name  = btn["name"]  if btn else "btnAccept"
+        btn_value = btn["value"] if btn else "I Accept"
+        resp = session.post(PROBATE_TOS, timeout=30, data={
+            **vs,
+            "__EVENTTARGET": "", "__EVENTARGUMENT": "",
+            btn_name: btn_value,
+        }, headers={"Referer": PROBATE_TOS})
+        resp.raise_for_status()
+        log.info("Probate TOS POST done. Final URL: %s | cookies: %s",
+                 resp.url, dict(session.cookies))
+        return session
+
+    def _search_estates(self):
+        date_to   = _date.today()
+        date_from = date_to - timedelta(days=LOOKBACK_DAYS)
+        log.info("Probate search window: %s -> %s", date_from, date_to)
+        fmt = lambda d: d.strftime("%m/%d/%Y")
+
+        resp = self._session.get(PROBATE_SEARCH, timeout=30,
+                                 headers={"Referer": PROBATE_TOS})
+        resp.raise_for_status()
+        log.info("Probate CaseSearch GET — final URL: %s", resp.url)
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        vs = {n: (soup.find("input", {"name": n}) or {}).get("value", "")
+              for n in ("__VIEWSTATE", "__VIEWSTATEGENERATOR", "__EVENTVALIDATION")}
+
+        # Detect prefix by finding any input whose name ends with btnSearchByParty
+        prefix = "mpContentPH$"
+        for inp in soup.find_all("input", {"type": "submit"}):
+            n = inp.get("name", "")
+            if "btnSearchByParty" in n:
+                prefix = n.replace("btnSearchByParty", "")
+                break
+            if "btnSearchByCase" in n:
+                prefix = n.replace("btnSearchByCase", "")
+                break
+        log.info("Probate prefix detected: '%s'", prefix)
+
+        payload = {
+            **vs,
+            "__EVENTTARGET":                   f"{prefix}btnSearchByParty",
+            "__EVENTARGUMENT":                 "",
+            f"{prefix}txtCaseYear":            "",
+            f"{prefix}ddlCaseCategory":        "",
+            f"{prefix}txtCaseNumber":          "",
+            f"{prefix}rblPartyType":           "P",
+            f"{prefix}txtFirstName":           "",
+            f"{prefix}txtMiddleName":          "",
+            f"{prefix}txtLastName":            "",
+            f"{prefix}ddlSuffix":              "",
+            f"{prefix}ddlPartyRole":           "",
+            f"{prefix}txtCaseYearParty":       "",
+            f"{prefix}ddlCaseCategoryParty":   "ES",
+            f"{prefix}txtFilingDateFrom":      fmt(date_from),
+            f"{prefix}txtFilingDateTo":        fmt(date_to),
+        }
+        log.info("Probate POST payload: %s", payload)
+        time.sleep(1)
+
+        resp = self._session.post(PROBATE_SEARCH, data=payload, timeout=45,
+                                  headers={"Referer": PROBATE_SEARCH})
+        resp.raise_for_status()
+        result_soup = BeautifulSoup(resp.text, "html.parser")
+        title = result_soup.find("title")
+        log.info("Probate POST title: %s | preview: %s",
+                 title.get_text(strip=True) if title else "none",
+                 result_soup.get_text(" ", strip=True)[:400])
+
+        rows = self._parse_results(result_soup)
+        log.info("Probate results: %d estate filings", len(rows))
+        for row in rows:
+            rec = self._row_to_record(row)
+            if rec:
+                self.raw_records.append(rec)
+
+    def _parse_results(self, soup):
+        rows = []
+        table = None
+        for t in soup.find_all("table"):
+            trs = t.find_all("tr")
+            if len(trs) > 1 and t.find("td"):
+                table = t
+                break
+        if not table:
+            log.warning("Probate: no results table found.")
+            return rows
+        tr_list = table.find_all("tr")
+        headers = [th.get_text(strip=True).lower()
+                   for th in tr_list[0].find_all(["th", "td"])]
+        log.info("Probate table headers: %s", headers)
+        def col(candidates):
+            for c in candidates:
+                for i, h in enumerate(headers):
+                    if c in h: return i
+            return None
+        idx = {
+            "case_no":   col(["case number", "case no", "casenumber", "case"]),
+            "name":      col(["name", "decedent", "party"]),
+            "case_type": col(["case type", "type"]),
+            "filed":     col(["filed", "filing date", "date"]),
+            "status":    col(["status"]),
+        }
+        for tr in tr_list[1:]:
+            cells = tr.find_all("td")
+            if not cells: continue
+            def cell(key):
+                i = idx.get(key)
+                return cells[i].get_text(strip=True) if i is not None and i < len(cells) else ""
+            link = tr.find("a", href=True)
+            href = link["href"] if link else ""
+            if href and not href.startswith("http"):
+                href = f"{PROBATE_BASE}/{href.lstrip('/')}"
+            rows.append({
+                "case_no":    cell("case_no"),
+                "name":       cell("name"),
+                "case_type":  cell("case_type"),
+                "filed":      cell("filed"),
+                "status":     cell("status"),
+                "detail_url": href,
+            })
+        return rows
+
+    def _row_to_record(self, row):
+        raw_name = row["name"].strip()
+        if not raw_name: return None
+        if "," in raw_name:
+            last, _, first = raw_name.partition(",")
+        else:
+            parts = raw_name.split()
+            last = parts[-1] if parts else raw_name
+            first = " ".join(parts[:-1])
+        owner = f"{last.strip().upper()}, {first.strip().upper()}" if first.strip() else last.strip().upper()
+        return {
+            "doc_num":      row["case_no"] or f"PRO-{raw_name[:20]}",
+            "doc_type":     "PRO",
+            "cat":          "PRO",
+            "cat_label":    "Probate / Estate",
+            "filed":        row["filed"],
+            "owner":        owner,
+            "grantee":      "",
+            "amount":       None,
+            "legal":        "",
+            "clerk_url":    row["detail_url"] or PROBATE_SEARCH,
+            "prop_address": "",
+            "prop_city":    "Cleveland",
+            "prop_state":   "OH",
+            "prop_zip":     "",
+            "mail_address": "", "mail_city": "", "mail_state": "OH", "mail_zip": "",
+            "source":       "Cuyahoga Probate Court",
+            "neighborhood": "",
+            "viol_status":  row["status"],
+            "viol_desc":    "",
+            "viol_severity": "",
+            "pro_case_no":  row["case_no"],
+            "pro_decedent": raw_name,
+            "pro_status":   row["status"],
+        }
 # ===========================================================================
 # Parcel Lookup — MyPlace enrichment
 # ===========================================================================
