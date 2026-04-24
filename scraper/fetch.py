@@ -507,21 +507,54 @@ class CodeViolationScraper:
                    or attrs.get("COMPLAINT_ACCELA_CITIZEN_ACCESS_URL") or "")
 
         SKIP_STATUSES = {
-            "closed", "withdrawn", "void", "cancelled", "resolved",
-            "duplicate", "no violation found", "dismissed",
+            "closed", "void", "closed/non-compliant",
+            "closed-referred to aging", "structure razed",
+            "demolition approved", "approved for demo",
         }
         if status.lower().strip() in SKIP_STATUSES:
             return None
 
-        viol_desc = ""
-        cat, cat_label = "CODE", "Code Violation"
-
-        if "chief approved" in status.lower():
-            viol_severity = "high"
-        elif any(x in status.lower() for x in ["mailed", "open", "created"]):
-            viol_severity = "medium"
+        STATUS_MAP = {
+            "chief approved":                ("CODE_STRUCT", "Substandard Structure",       "high"),
+            "placard post/photo":            ("CODE_STRUCT", "Substandard Structure",       "high"),
+            "court judgment":                ("CODE_STRUCT", "Substandard Structure",       "high"),
+            "court stat":                    ("CODE_STRUCT", "Substandard Structure",       "high"),
+            "court date set":                ("CODE_STRUCT", "Substandard Structure",       "high"),
+            "search warrant executed":       ("CODE_STRUCT", "Substandard Structure",       "high"),
+            "summons approved":              ("CODE_STRUCT", "Substandard Structure",       "high"),
+            "prosecution packet to chief":   ("CODE_STRUCT", "Substandard Structure",       "high"),
+            "prosecution pkt created":       ("CODE_STRUCT", "Substandard Structure",       "high"),
+            "s/w packet sent to chief":      ("CODE_STRUCT", "Substandard Structure",       "high"),
+            "s/w packet sent to legal":      ("CODE_STRUCT", "Substandard Structure",       "high"),
+            "paralegal to law":              ("CODE_STRUCT", "Substandard Structure",       "high"),
+            "packet sent to legal":          ("CODE_STRUCT", "Substandard Structure",       "high"),
+            "filed w/clerk of courts":       ("CODE_STRUCT", "Substandard Structure",       "high"),
+            "lockbox processed":             ("CODE_STRUCT", "Substandard Structure",       "high"),
+            "boza denied":                   ("CODE_STRUCT", "Substandard Structure",       "high"),
+            "vn created & mailed":           ("CODE",        "Code Violation",              "medium"),
+            "open":                          ("CODE",        "Code Violation",              "medium"),
+            "pending":                       ("CODE",        "Code Violation",              "medium"),
+            "awaiting reinspection":         ("CODE",        "Code Violation",              "medium"),
+            "post&photo (p)":                ("CODE",        "Code Violation",              "medium"),
+            "demo file to chief":            ("CODE_STRUCT", "Substandard Structure",       "medium"),
+            "demo packet to legal":          ("CODE_STRUCT", "Substandard Structure",       "medium"),
+            "packet requested from chief":   ("CODE_STRUCT", "Substandard Structure",       "medium"),
+            "packet to chief for revision":  ("CODE_STRUCT", "Substandard Structure",       "medium"),
+            "packet to paralegal from chief":("CODE_STRUCT", "Substandard Structure",       "medium"),
+            "packet to chief for inspector": ("CODE_STRUCT", "Substandard Structure",       "medium"),
+            "to inspector for revision":     ("CODE_STRUCT", "Substandard Structure",       "medium"),
+            "post&photo (nc)":               ("CODE_STRUCT", "Substandard Structure",       "medium"),
+            "post&photo (c)":                ("CODE_STRUCT", "Substandard Structure",       "medium"),
+            "bbs appeal":                    ("CODE",        "Code Violation",              "medium"),
+            "bbs/boza appeal":               ("CODE",        "Code Violation",              "medium"),
+            "boza dismissed":                ("CODE",        "Code Violation",              "medium"),
+        }
+        s_lower = status.lower().strip()
+        if s_lower in STATUS_MAP:
+            cat, cat_label, viol_severity = STATUS_MAP[s_lower]
         else:
-            viol_severity = "low"
+            cat, cat_label, viol_severity = "CODE", "Code Violation", "low"
+        viol_desc = status
 
         filed = ""
         raw_date = attrs.get("FILE_DATE")
@@ -951,6 +984,8 @@ class ProbateScraper:
         btn = soup.find("input", {"type": "submit"})
         btn_name  = btn["name"]  if btn else "btnAccept"
         btn_value = btn["value"] if btn else "I Accept"
+        session.cookies.set("CUPR_WEBDOCKET", "1",
+                            domain="probate.cuyahogacounty.gov", path="/pa")
         resp = session.post(PROBATE_TOS, timeout=30, data={
             **vs,
             "__EVENTTARGET": "", "__EVENTARGUMENT": "",
@@ -988,32 +1023,24 @@ class ProbateScraper:
                 break
         log.info("Probate prefix detected: '%s'", prefix)
 
-        # Scrape ALL form fields from the page so the POST is complete.
-        # Sending incomplete payloads causes PROWARE 500 errors.
-        payload = {"__EVENTTARGET": f"{prefix}btnSearchByParty",
-                   "__EVENTARGUMENT": ""}
-        for inp in soup.find_all("input"):
-            n = inp.get("name", "")
-            v = inp.get("value", "")
-            if n and n not in ("__EVENTTARGET", "__EVENTARGUMENT"):
-                payload[n] = v
-        for sel_tag in soup.find_all("select"):
-            n = sel_tag.get("name", "")
-            if n:
-                selected = sel_tag.find("option", selected=True)
-                payload[n] = selected["value"] if selected else ""
-        # Override with our Estate party search parameters
-        payload[f"{prefix}rblPartyType"]         = "P"
-        payload[f"{prefix}txtFirstName"]         = ""
-        payload[f"{prefix}txtMiddleName"]        = ""
-        payload[f"{prefix}txtLastName"]          = ""
-        payload[f"{prefix}txtCaseYearParty"]     = ""
-        payload[f"{prefix}ddlCaseCategoryParty"] = "ES"
-        payload[f"{prefix}txtFilingDateFrom"]    = fmt(date_from)
-        payload[f"{prefix}txtFilingDateTo"]      = fmt(date_to)
-        payload[f"{prefix}txtCaseYear"]          = ""
-        payload[f"{prefix}txtCaseNumber"]        = ""
-        payload[f"{prefix}ddlCaseCategory"]      = ""
+        payload = {
+            **vs,
+            "__EVENTTARGET":                   f"{prefix}btnSearchByParty",
+            "__EVENTARGUMENT":                 "",
+            f"{prefix}txtCaseYear":            "",
+            f"{prefix}ddlCaseCategory":        "",
+            f"{prefix}txtCaseNumber":          "",
+            f"{prefix}rblPartyType":           "P",
+            f"{prefix}txtFirstName":           "",
+            f"{prefix}txtMiddleName":          "",
+            f"{prefix}txtLastName":            "",
+            f"{prefix}ddlSuffix":              "",
+            f"{prefix}ddlPartyRole":           "",
+            f"{prefix}txtCaseYearParty":       "",
+            f"{prefix}ddlCaseCategoryParty":   "ES",
+            f"{prefix}txtFilingDateFrom":      fmt(date_from),
+            f"{prefix}txtFilingDateTo":        fmt(date_to),
+        }
         log.info("Probate POST payload: %s", payload)
         time.sleep(1)
 
