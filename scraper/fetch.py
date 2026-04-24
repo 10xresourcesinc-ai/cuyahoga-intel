@@ -951,6 +951,8 @@ class ProbateScraper:
         btn = soup.find("input", {"type": "submit"})
         btn_name  = btn["name"]  if btn else "btnAccept"
         btn_value = btn["value"] if btn else "I Accept"
+      # Force the CUPR_WEBDOCKET cookie manually — requests rejects it due to missing domain/path
+        session.cookies.set("CUPR_WEBDOCKET", "1", domain="probate.cuyahogacounty.gov", path="/")
         resp = session.post(PROBATE_TOS, timeout=30, data={
             **vs,
             "__EVENTTARGET": "", "__EVENTARGUMENT": "",
