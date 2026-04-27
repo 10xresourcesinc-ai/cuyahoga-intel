@@ -1143,6 +1143,117 @@ class ProbateScraper:
             "pro_status":   row["status"],
         }
 # ===========================================================================
+# Lis Pendens PDF Parser  (LP)
+# ===========================================================================
+# How to use:
+#   1. Go to cuyahoga.oh.publicsearch.us
+#   2. Search "lis pendens", set date range Jan 2026 to today
+#   3. Click "Export all Results" → download PDF
+#   4. Commit the PDF to repo as data/lp_export.pdf
+#   5. It will be auto-parsed on every scraper run
+#
+# Column x-positions confirmed from Neumo PDF header (page width 792pt):
+#   Grantor=24, Grantee=105, Date=267, DocNum=328, Parcel=530, Address=590
+
+_LP_COLS = {
+    "grantor": (24,  105),
+    "grantee": (105, 187),
+    "date":    (267, 328),
+    "docnum":  (328, 400),
+    "parcel":  (530, 590),
+    "address": (590, 654),
+}
+_LP_CUTOFF = datetime(2026, 1, 1)
+
+
+def parse_lp_pdf(pdf_path: str) -> list:
+    """Parse a Cuyahoga County Recorder lis pendens PDF into LP lead records."""
+    try:
+        import pdfplumber as _pp
+    except ImportError:
+        log.warning("pdfplumber not installed — LP PDF skipped. pip install pdfplumber")
+        return []
+
+    def _col(words, col):
+        lo, hi = _LP_COLS[col]
+        return " ".join(w["text"] for w in sorted(
+            [w for w in words if lo <= w["x0"] < hi],
+            key=lambda w: (w["top"], w["x0"])
+        ))
+
+    records = []
+    try:
+        with _pp.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                words = [w for w in page.extract_words(x_tolerance=3, y_tolerance=3)
+                         if 120 < w["top"] < 750]
+                rows = defaultdict(list)
+                for w in words:
+                    rows[round(w["top"] / 5) * 5].append(w)
+                starts = [
+                    y for y, rw in sorted(rows.items())
+                    if re.search(r"\b\d{12}\b", " ".join(w["text"] for w in rw))
+                    and re.search(r"\b\d{1,2}/\d{1,2}/\d{4}\b", " ".join(w["text"] for w in rw))
+                ]
+                for i, sy in enumerate(starts):
+                    ey = starts[i + 1] if i + 1 < len(starts) else 750
+                    rw = [w for w in words if sy <= w["top"] < ey]
+                    rt = " ".join(w["text"] for w in rw)
+                    dm  = re.search(r"\b(\d{12})\b", rt)
+                    dtm = re.search(r"\b(\d{1,2}/\d{1,2}/\d{4})\b", rt)
+                    if not dm or not dtm:
+                        continue
+                    try:
+                        if datetime.strptime(dtm.group(1), "%m/%d/%Y") < _LP_CUTOFF:
+                            continue
+                    except Exception:
+                        pass
+                    pm  = re.search(r"\d{3}-\d{2}-\d{3}", _col(rw, "parcel"))
+                    ar  = _col(rw, "address")
+                    zm  = re.search(r"\b(44\d{3})\b", ar)
+                    om  = re.search(r"([A-Za-z\s]+?),?\s*(?:OHIO|Ohio)", ar)
+                    records.append({
+                        "doc_num":       dm.group(1),
+                        "doc_type":      "LP",
+                        "cat":           "LP",
+                        "cat_label":     "Lis Pendens",
+                        "filed":         dtm.group(1),
+                        "owner":         _col(rw, "grantor").title().rstrip(",").strip(),
+                        "grantee":       _col(rw, "grantee").title().rstrip(",").strip(),
+                        "amount":        None,
+                        "legal":         format_parcel(pm.group(0)) if pm else "",
+                        "clerk_url":     f"https://cuyahoga.oh.publicsearch.us/doc/{dm.group(1)}",
+                        "prop_address":  ar[:om.start()].strip().title() if om else ar.strip().title(),
+                        "prop_city":     om.group(1).strip().title() if om else "Cleveland",
+                        "prop_state":    "OH",
+                        "prop_zip":      zm.group(1) if zm else "",
+                        "mail_address":  "",
+                        "mail_city":     "",
+                        "mail_state":    "OH",
+                        "mail_zip":      "",
+                        "source":        "Cuyahoga Recorder PDF",
+                        "neighborhood":  "",
+                        "viol_status":   "",
+                        "viol_desc":     "",
+                        "viol_severity": "",
+                    })
+    except Exception as e:
+        log.warning("LP PDF parse failed: %s", e)
+
+    log.info("LP PDF: %d lis pendens records (Jan 2026+)", len(records))
+    return records
+
+
+def load_lp_pdf_if_present() -> list:
+    """Auto-load LP PDF from data/lp_export.pdf if it exists."""
+    lp_pdf = REPO_ROOT / "data" / "lp_export.pdf"
+    if lp_pdf.exists():
+        log.info("Found LP PDF at %s — parsing ...", lp_pdf)
+        return parse_lp_pdf(str(lp_pdf))
+    return []
+
+
+# ===========================================================================
 # Parcel Lookup — MyPlace enrichment
 # ===========================================================================
 
