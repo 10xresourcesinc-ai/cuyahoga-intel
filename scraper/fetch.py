@@ -1554,7 +1554,12 @@ async def main():
     records.extend(probate.raw_records)
     log.info("Total after probate: %d", len(records))
 
-    # 5. Parcel enrichment
+    # 5. Lis pendens from recorder PDF (place at data/lp_export.pdf to auto-load)
+    lp_records = load_lp_pdf_if_present()
+    records.extend(lp_records)
+    log.info("Total after LP: %d", len(records))
+
+    # 6. Parcel enrichment
     log.info("Enriching records with parcel data ...")
     enriched = parcel.enrich_records(records)
     log.info("Enriched %d/%d records with parcel data", enriched, len(records))
