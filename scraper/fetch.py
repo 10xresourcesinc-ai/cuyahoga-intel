@@ -4,7 +4,8 @@ Sources:
   NOFC    — Cuyahoga Common Pleas Court sheriff sale docket
   CODE    — Cleveland ArcGIS code violations
   CONDEMN — Cleveland ArcGIS condemnations
-  PRO     — Cuyahoga County Probate Court estate filings  ← Phase 3
+  PRO     — Cuyahoga County Probate Court estate filings
+  BK      — Northern District of Ohio bankruptcy filings (CourtListener API)
 """
 
 import asyncio
@@ -1254,6 +1255,143 @@ def load_lp_pdf_if_present() -> list:
 
 
 # ===========================================================================
+# Bankruptcy Scraper  (BK) — CourtListener API
+# ===========================================================================
+# Uses the free CourtListener REST API to pull Chapter 7/13 filings from the
+# Northern District of Ohio (Cuyahoga County).
+# Set env var COURTLISTENER_TOKEN if you have an account (higher rate limits).
+# Without a token the API still works but is rate-limited to ~100 req/day.
+#
+# After pulling filers, each name is looked up in MyPlace. If a parcel match
+# is found, owns_property=True. If not, owns_property=False and the lead is
+# still created but flagged "No property found" so it sinks in the dashboard.
+
+COURTLISTENER_BASE = "https://www.courtlistener.com/api/rest/v4"
+# Cuyahoga County FIPS = 39035, Northern District of Ohio court = ohnb
+BK_COURT          = "ohnb"
+BK_CHAPTERS       = ["7", "13"]
+
+
+class BankruptcyScraper:
+
+    def __init__(self):
+        self.raw_records: list[dict] = []
+        self._session = requests.Session()
+        self._session.headers.update({
+            "User-Agent": "CuyahogaLeadScraper/1.0",
+            "Accept":     "application/json",
+        })
+        token = os.getenv("COURTLISTENER_TOKEN", "")
+        if token:
+            self._session.headers["Authorization"] = f"Token {token}"
+            log.info("CourtListener: using auth token")
+        else:
+            log.info("CourtListener: no token set — using public rate limit")
+
+    def run(self):
+        log.info("Scraping Northern District Ohio bankruptcy filings ...")
+        cutoff = (datetime.now() - timedelta(days=LOOKBACK_DAYS)).strftime("%Y-%m-%d")
+        for chapter in BK_CHAPTERS:
+            self._fetch_chapter(chapter, cutoff)
+        log.info("Bankruptcy filings: %d records", len(self.raw_records))
+
+    def _fetch_chapter(self, chapter: str, cutoff: str):
+        url = f"{COURTLISTENER_BASE}/dockets/"
+        params = {
+            "court":            BK_COURT,
+            "chapter":          chapter,
+            "date_filed__gte":  cutoff,
+            "nature_of_suit":   "",   # all
+            "order_by":         "-date_filed",
+            "page_size":        100,
+            "format":           "json",
+        }
+        page = 1
+        fetched = 0
+        while url:
+            try:
+                r = self._session.get(
+                    url if page > 1 else f"{COURTLISTENER_BASE}/dockets/",
+                    params=params if page == 1 else None,
+                    timeout=30
+                )
+                if r.status_code == 429:
+                    log.warning("CourtListener rate limited — stopping BK fetch")
+                    break
+                if r.status_code != 200:
+                    log.warning("CourtListener HTTP %d for chapter %s", r.status_code, chapter)
+                    break
+                data = r.json()
+                results = data.get("results", [])
+                log.info("BK chapter %s page %d: %d results", chapter, page, len(results))
+                for item in results:
+                    rec = self._item_to_record(item, chapter)
+                    if rec:
+                        self.raw_records.append(rec)
+                        fetched += 1
+                url = data.get("next")  # pagination
+                page += 1
+                time.sleep(1)  # be polite
+            except Exception as e:
+                log.warning("CourtListener fetch failed (chapter %s): %s", chapter, e)
+                break
+        log.info("BK chapter %s: %d records fetched", chapter, fetched)
+
+    def _item_to_record(self, item: dict, chapter: str) -> Optional[dict]:
+        # CourtListener docket fields
+        case_name  = (item.get("case_name") or "").strip()
+        case_num   = (item.get("docket_number") or "").strip()
+        filed      = (item.get("date_filed") or "")
+        clerk_url  = f"https://www.courtlistener.com{item.get('absolute_url', '')}"
+
+        if not case_name:
+            return None
+
+        # Parse debtor name — BK case names are typically "In re: LASTNAME, FIRSTNAME"
+        # or "LASTNAME, FIRSTNAME" after stripping "In re:"
+        name = re.sub(r"(?i)^in\s+re:?\s*", "", case_name).strip()
+        name = re.sub(r"\s*\(.*?\)", "", name).strip()   # strip "(Chapter 7)" suffixes
+
+        # Format filed date MM/DD/YYYY
+        filed_fmt = ""
+        if filed:
+            try:
+                filed_fmt = datetime.strptime(filed[:10], "%Y-%m-%d").strftime("%m/%d/%Y")
+            except Exception:
+                filed_fmt = filed
+
+        # Address from pacer_doc_id or parties — CourtListener basic docket
+        # doesn't always include address; MyPlace lookup will fill it in
+        return {
+            "doc_num":       case_num or f"BK-{name[:20]}",
+            "doc_type":      f"BK{chapter}",
+            "cat":           "BK",
+            "cat_label":     f"Bankruptcy Ch.{chapter}",
+            "filed":         filed_fmt,
+            "owner":         name,
+            "grantee":       "",
+            "amount":        None,
+            "legal":         "",          # filled by parcel enrichment
+            "clerk_url":     clerk_url,
+            "prop_address":  "",
+            "prop_city":     "Cleveland",
+            "prop_state":    "OH",
+            "prop_zip":      "",
+            "mail_address":  "",
+            "mail_city":     "",
+            "mail_state":    "OH",
+            "mail_zip":      "",
+            "source":        "CourtListener / PACER",
+            "neighborhood":  "",
+            "viol_status":   "",
+            "viol_desc":     "",
+            "viol_severity": "",
+            "owns_property": None,        # None = not yet checked; True/False after enrichment
+            "bk_chapter":    chapter,
+        }
+
+
+# ===========================================================================
 # Parcel Lookup — MyPlace enrichment
 # ===========================================================================
 
@@ -1292,12 +1430,17 @@ class ParcelLookup:
         for rec in records:
             parcel = rec.get("legal", "")
             if not parcel:
-                # PRO records have no parcel yet — try owner-name lookup
-                if rec.get("cat") == "PRO" and rec.get("owner"):
+                # PRO and BK records have no parcel yet — try owner-name lookup
+                if rec.get("cat") in ("PRO", "BK") and rec.get("owner"):
                     match = self._owner_name_lookup(rec["owner"])
                     if match:
                         self._apply_match(rec, match)
+                        if rec.get("cat") == "BK":
+                            rec["owns_property"] = True
                         enriched += 1
+                    else:
+                        if rec.get("cat") == "BK":
+                            rec["owns_property"] = False
                 continue
             match = self._api_lookup_parcel(parcel)
             if match:
@@ -1516,6 +1659,16 @@ class LeadScorer:
             points += 10
         if cat == "PRO":   flags.append("Probate / estate"); points += 10
         if cat == "RELLP": flags.append("Lis pendens");      points += 5
+        if cat == "BK":
+            chapter = rec.get("bk_chapter", "")
+            flags.append(f"Bankruptcy Ch.{chapter}" if chapter else "Bankruptcy")
+            points += 15
+            if rec.get("owns_property") is False:
+                flags.append("No property found")
+                points = min(points, 25)   # cap score — unconfirmed property owner
+            elif rec.get("owns_property") is True:
+                flags.append("Property confirmed")
+                points += 10
 
         norm = normalize_name(owner)
         if norm:
@@ -1569,6 +1722,8 @@ GHL_COLS = [
     "Violation Description", "Violation Severity",
     # PRO-specific columns
     "Probate Case No", "Decedent Name", "Estate Status",
+    # BK-specific columns
+    "Bankruptcy Chapter", "Owns Property",
 ]
 
 def split_name(n):
@@ -1621,6 +1776,11 @@ def export_csv(records: list, path: Path):
                 "Probate Case No":        r.get("pro_case_no", ""),
                 "Decedent Name":          r.get("pro_decedent", ""),
                 "Estate Status":          r.get("pro_status", ""),
+                # BK-specific
+                "Bankruptcy Chapter":     r.get("bk_chapter", ""),
+                "Owns Property":          ("Yes" if r.get("owns_property") is True
+                                           else "No" if r.get("owns_property") is False
+                                           else ""),
             })
     log.info("GHL CSV: %d rows -> %s", len(records), path)
 
@@ -1686,7 +1846,7 @@ def is_sfh_or_land(rec: dict) -> bool:
 
 async def main():
     log.info("=" * 60)
-    log.info("Cuyahoga County Lead Scraper — NOFC + CODE + CONDEMN + PRO")
+    log.info("Cuyahoga County Lead Scraper — NOFC + CODE + CONDEMN + PRO + BK")
     log.info("Lookback: %d days", LOOKBACK_DAYS)
     log.info("=" * 60)
 
@@ -1717,6 +1877,12 @@ async def main():
     lp_records = load_lp_pdf_if_present()
     records.extend(lp_records)
     log.info("Total after LP: %d", len(records))
+
+    # 6. Bankruptcy filings (BK) — CourtListener API
+    bk = BankruptcyScraper()
+    bk.run()
+    records.extend(bk.raw_records)
+    log.info("Total after BK: %d", len(records))
 
     # 6. Parcel enrichment
     log.info("Enriching records with parcel data ...")
@@ -1776,7 +1942,7 @@ async def main():
     with_addr = sum(1 for r in records if r.get("prop_address") or r.get("mail_address"))
     output = {
         "fetched_at": datetime.now(timezone.utc).isoformat(),
-        "source":     "Cuyahoga Court Docket + Code Violations + Probate + Manual Uploads",
+        "source":     "Cuyahoga Court Docket + Code Violations + Probate + Bankruptcy + Manual Uploads",
         "date_range": {
             "from": (datetime.now() - timedelta(days=LOOKBACK_DAYS)).strftime("%m/%d/%Y"),
             "to":   datetime.now().strftime("%m/%d/%Y"),
