@@ -1389,6 +1389,7 @@ class ParcelLookup:
             if not data or not data[0]:
                 return None
             attrs = data[0][0] if isinstance(data[0], list) else data[0]
+            log.info("WCF attrs sample: %s", dict(list(attrs.items())[:25]))
             result = self._attrs_to_match(attrs)
             if result:
                 self._by_parcel[parcel] = result
@@ -1401,30 +1402,77 @@ class ParcelLookup:
 
     @staticmethod
     def _attrs_to_match(attrs: dict) -> Optional[dict]:
-        owner     = normalize_name(attrs.get("DEEDED_OWNER") or "")
+        owner     = normalize_name(attrs.get("DEEDED_OWNER") or attrs.get("OWNER") or "")
         site_addr = (attrs.get("PHYSICAL_ADDRESS") or "").strip().title()
         city      = (attrs.get("PARCEL_CITY") or "Cleveland").strip().title()
         zipcode   = str(attrs.get("PARCEL_ZIP") or "")
         parcel    = (attrs.get("PARCEL_NUMBER") or attrs.get("PIN") or "")
+
+        # Mailing address — populated when owner mails to a different address
+        mail_addr  = (attrs.get("MAIL_ADDRESS") or attrs.get("MAILING_ADDRESS") or "").strip().title()
+        mail_city  = (attrs.get("MAIL_CITY")    or "").strip().title()
+        mail_state = (attrs.get("MAIL_STATE")   or "OH").strip().upper()
+        mail_zip   = str(attrs.get("MAIL_ZIP")  or "")
+
+        # Out-of-state flag — derived from mailing state
+        out_of_state = mail_state not in ("", "OH") if mail_state else False
+
+        # Delinquency — try multiple possible WCF field name variants
+        try:
+            delinq_raw = float(
+                attrs.get("DELINQUENT_AMOUNT")
+                or attrs.get("BACK_TAX_AMOUNT")
+                or attrs.get("DELINQ_AMOUNT")
+                or 0
+            )
+        except (TypeError, ValueError):
+            delinq_raw = 0.0
+        delinquent = bool(
+            attrs.get("DELINQUENT_FLAG")
+            or attrs.get("DELINQUENT")
+            or attrs.get("IS_DELINQUENT")
+            or attrs.get("DELINQ_FLAG")
+            or delinq_raw > 0
+        )
+        delinq_amt = f"{delinq_raw:,.2f}" if delinq_raw > 0 else str(
+            attrs.get("DELINQUENT_AMOUNT") or attrs.get("BACK_TAX_AMOUNT") or ""
+        )
+
+        # Homestead exemption — try multiple field name variants
+        homestead = bool(
+            attrs.get("HOMESTEAD")
+            or attrs.get("HOMESTEAD_FLAG")
+            or attrs.get("HMSTD_FLAG")
+            or attrs.get("HMSTD")
+        )
+
+        # Land use code
+        luc      = str(attrs.get("TAX_LUC") or attrs.get("LUC") or "")
+        luc_desc = str(attrs.get("TAX_LUC_DESCRIPTION") or attrs.get("LUC_DESC") or "")
+
+        # Appraised / assessed value
+        appraised = str(attrs.get("CERTIFIED_TAX_TOTAL") or attrs.get("APPRAISED") or "")
+
         if not (owner or site_addr):
             return None
+
         return {
             "owner":        owner,
             "site_addr":    site_addr,
             "site_city":    city,
             "site_zip":     zipcode,
-            "mail_addr":    "",
-            "mail_city":    "",
-            "mail_state":   "OH",
-            "mail_zip":     "",
+            "mail_addr":    mail_addr,
+            "mail_city":    mail_city,
+            "mail_state":   mail_state,
+            "mail_zip":     mail_zip,
             "parcel":       parcel,
-            "delinquent":   False,
-            "delinq_amt":   "",
-            "homestead":    False,
-            "appraised":    str(attrs.get("CERTIFIED_TAX_TOTAL") or ""),
-            "out_of_state": False,
-            "luc":          "",
-            "luc_desc":     "",
+            "delinquent":   delinquent,
+            "delinq_amt":   delinq_amt,
+            "homestead":    homestead,
+            "appraised":    appraised,
+            "out_of_state": out_of_state,
+            "luc":          luc,
+            "luc_desc":     luc_desc,
         }
 
     def _lookup_luc(self, parcel: str) -> str:
