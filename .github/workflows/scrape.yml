@@ -46,7 +46,8 @@ jobs:
           mkdir -p dashboard
           mkdir -p data
 
-      # ----------------------------------------------------------------- name: Run scraper
+# ----------------------------------------------------------------
+      - name: Run scraper
         env:
           LOOKBACK_DAYS: "30"
           PYTHONUNBUFFERED: "1"
