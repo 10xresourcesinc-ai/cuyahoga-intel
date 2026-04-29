@@ -1296,22 +1296,25 @@ class BankruptcyScraper:
         log.info("Bankruptcy filings: %d records", len(self.raw_records))
 
     def _fetch_chapter(self, chapter: str, cutoff: str):
-        url = f"{COURTLISTENER_BASE}/dockets/"
+        # Use /bankruptcy-information/ endpoint — the correct endpoint for
+        # filtering by chapter. Then follow the docket URL for case metadata.
+        endpoint = f"{COURTLISTENER_BASE}/bankruptcy-information/"
         params = {
-            "court":            BK_COURT,
-            "chapter":          chapter,
-            "date_filed__gte":  cutoff,
-            "nature_of_suit":   "",   # all
-            "order_by":         "-date_filed",
-            "page_size":        100,
-            "format":           "json",
+            "docket__court":           BK_COURT,
+            "chapter":                 chapter,
+            "docket__date_filed__gte": cutoff,
+            "order_by":                "-docket__date_filed",
+            "page_size":               100,
+            "format":                  "json",
+            "fields":                  "docket,chapter,date_filed",
         }
+        next_url = endpoint
         page = 1
         fetched = 0
-        while url:
+        while next_url:
             try:
                 r = self._session.get(
-                    url if page > 1 else f"{COURTLISTENER_BASE}/dockets/",
+                    next_url,
                     params=params if page == 1 else None,
                     timeout=30
                 )
@@ -1319,40 +1322,58 @@ class BankruptcyScraper:
                     log.warning("CourtListener rate limited — stopping BK fetch")
                     break
                 if r.status_code != 200:
-                    log.warning("CourtListener HTTP %d for chapter %s", r.status_code, chapter)
+                    log.warning("CourtListener HTTP %d for chapter %s: %s",
+                                r.status_code, chapter, r.text[:200])
                     break
                 data = r.json()
                 results = data.get("results", [])
                 log.info("BK chapter %s page %d: %d results", chapter, page, len(results))
                 for item in results:
-                    rec = self._item_to_record(item, chapter)
+                    rec = self._bkinfo_to_record(item, chapter)
                     if rec:
                         self.raw_records.append(rec)
                         fetched += 1
-                url = data.get("next")  # pagination
+                next_url = data.get("next")
                 page += 1
-                time.sleep(1)  # be polite
+                time.sleep(1)
             except Exception as e:
                 log.warning("CourtListener fetch failed (chapter %s): %s", chapter, e)
                 break
         log.info("BK chapter %s: %d records fetched", chapter, fetched)
 
-    def _item_to_record(self, item: dict, chapter: str) -> Optional[dict]:
-        # CourtListener docket fields
-        case_name  = (item.get("case_name") or "").strip()
-        case_num   = (item.get("docket_number") or "").strip()
-        filed      = (item.get("date_filed") or "")
-        clerk_url  = f"https://www.courtlistener.com{item.get('absolute_url', '')}"
+    def _bkinfo_to_record(self, item: dict, chapter: str) -> Optional[dict]:
+        # item has: docket (URL or nested obj), chapter, date_filed
+        docket_data = item.get("docket") or {}
+
+        # docket may be a URL string or a nested dict depending on API version
+        if isinstance(docket_data, str):
+            # Fetch the docket object to get case_name, docket_number etc.
+            try:
+                r = self._session.get(docket_data,
+                                      params={"format": "json",
+                                              "fields": "case_name,docket_number,date_filed,absolute_url"},
+                                      timeout=15)
+                if r.status_code == 200:
+                    docket_data = r.json()
+                else:
+                    docket_data = {}
+            except Exception:
+                docket_data = {}
+
+        case_name = (docket_data.get("case_name") or "").strip()
+        case_num  = (docket_data.get("docket_number") or "").strip()
+        filed     = (docket_data.get("date_filed") or item.get("date_filed") or "")
+        abs_url   = docket_data.get("absolute_url", "")
+        clerk_url = f"https://www.courtlistener.com{abs_url}" if abs_url else \
+                    "https://www.courtlistener.com/recap/"
 
         if not case_name:
             return None
 
-        # Parse debtor name — BK case names are typically "In re: LASTNAME, FIRSTNAME"
-        # or "LASTNAME, FIRSTNAME" after stripping "In re:"
+        # Strip "In re:" prefix common in bankruptcy case names
         name = re.sub(r"(?i)^in\s+re:?\s*", "", case_name).strip()
-        name = re.sub(r"\s*\(.*?\)", "", name).strip()   # strip "(Chapter 7)" suffixes
+        name = re.sub(r"\s*\(.*?\)", "", name).strip()
 
-        # Format filed date MM/DD/YYYY
         filed_fmt = ""
         if filed:
             try:
@@ -1360,8 +1381,6 @@ class BankruptcyScraper:
             except Exception:
                 filed_fmt = filed
 
-        # Address from pacer_doc_id or parties — CourtListener basic docket
-        # doesn't always include address; MyPlace lookup will fill it in
         return {
             "doc_num":       case_num or f"BK-{name[:20]}",
             "doc_type":      f"BK{chapter}",
@@ -1371,7 +1390,7 @@ class BankruptcyScraper:
             "owner":         name,
             "grantee":       "",
             "amount":        None,
-            "legal":         "",          # filled by parcel enrichment
+            "legal":         "",
             "clerk_url":     clerk_url,
             "prop_address":  "",
             "prop_city":     "Cleveland",
@@ -1386,9 +1405,10 @@ class BankruptcyScraper:
             "viol_status":   "",
             "viol_desc":     "",
             "viol_severity": "",
-            "owns_property": None,        # None = not yet checked; True/False after enrichment
+            "owns_property": None,
             "bk_chapter":    chapter,
         }
+
 
 
 # ===========================================================================
