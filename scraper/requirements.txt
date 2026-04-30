@@ -1,5 +1,5 @@
 requests
 beautifulsoup4
 lxml
-dbfread
-playwright
+urllib3
+pdfplumber
