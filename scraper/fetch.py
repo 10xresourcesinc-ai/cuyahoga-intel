@@ -58,12 +58,6 @@ VIOLATIONS_URL    = f"{CLEVELAND_ORG}/Complaint_Violation_Notices/FeatureServer/
 CONDEMNATIONS_URL = f"{CLEVELAND_ORG}/Current_Condemnations/FeatureServer/0/query"
 VIOLATIONS_META   = f"{CLEVELAND_ORG}/Complaint_Violation_Notices/FeatureServer/0"
 
-# Cuyahoga County Treasurer — delinquent tax parcel layer (public ArcGIS)
-TREASURER_DELINQ_URL = (
-    "https://gis.cuyahogacounty.us/server/rest/services/"
-    "Treasurer/DelinquentTaxParcels/MapServer/0/query"
-)
-
 PROBATE_BASE   = "https://probate.cuyahogacounty.gov/pa"
 PROBATE_TOS    = f"{PROBATE_BASE}/TOS.aspx"
 PROBATE_SEARCH = f"{PROBATE_BASE}/CaseSearch.aspx"
@@ -1163,12 +1157,14 @@ class ProbateScraper:
 #   Grantor=24, Grantee=105, Date=267, DocNum=328, Parcel=530, Address=590
 
 _LP_COLS = {
-    "grantor": (24,  105),
-    "grantee": (105, 187),
-    "date":    (267, 328),
-    "docnum":  (328, 400),
-    "parcel":  (530, 590),
-    "address": (590, 654),
+    # Column x-ranges from Cuyahoga County Recorder PDF (letter landscape ~792pt wide)
+    # Grantor | Grantee | DocType | Date | DocNum | Legal | ParcelID | Address
+    "grantor": (0,   102),
+    "grantee": (102, 205),
+    "date":    (269, 328),
+    "docnum":  (328, 407),
+    "parcel":  (495, 582),   # "Parcel ID" column — was (530,590) which missed it
+    "address": (582, 693),
 }
 _LP_CUTOFF = datetime(2026, 1, 1)
 
@@ -1431,7 +1427,6 @@ class ParcelLookup:
         self._by_parcel  = {}
         self._by_address = {}
         self._session    = None
-        self._delinq_cache = {}   # parcel_pin -> {"delinquent": bool, "delinq_amt": str}
 
     def load(self):
         self._session = requests.Session()
@@ -1481,40 +1476,22 @@ class ParcelLookup:
             rec["prop_address"] = match["site_addr"]
             rec["prop_city"]    = match.get("site_city") or "Cleveland"
             rec["prop_zip"]     = match.get("site_zip", "")
-        if not rec.get("owner") and match.get("owner"):
-            rec["owner"] = match["owner"]
-        if not rec.get("legal") and match.get("parcel"):
-            rec["legal"] = match["parcel"]
-        rec["homestead"]    = match.get("homestead", False)
-        rec["appraised"]    = match.get("appraised", "")
-        rec["luc"]          = match.get("luc", "")
-        rec["luc_desc"]     = match.get("luc_desc", "")
-
-        # --- Delinquency + mailing address: prefer Treasurer ArcGIS layer ---
-        # WCF only returns 6 fields and never has MAIL_* or delinquency data.
-        # Query the Treasurer delinquent-tax layer instead; if the parcel is not
-        # in that layer it simply means it is current (delinquent=False).
-        parcel_pin = match.get("parcel") or rec.get("legal", "")
-        treas = self._treasurer_delinq_lookup(parcel_pin) if parcel_pin else {}
-
-        if treas.get("mail_addr"):
-            rec["mail_address"] = treas["mail_addr"]
-            rec["mail_city"]    = treas["mail_city"]
-            rec["mail_state"]   = treas["mail_state"] or "OH"
-            rec["mail_zip"]     = treas["mail_zip"]
-        elif match.get("mail_addr"):
-            # Fall back to whatever WCF returned (may still be empty)
+        if match.get("mail_addr"):
             rec["mail_address"] = match["mail_addr"]
             rec["mail_city"]    = match.get("mail_city", "")
             rec["mail_state"]   = match.get("mail_state") or "OH"
             rec["mail_zip"]     = match.get("mail_zip", "")
-
-        rec["delinquent"]   = treas.get("delinquent", match.get("delinquent", False))
-        rec["delinq_amt"]   = treas.get("delinq_amt", match.get("delinq_amt", ""))
-
-        # Out-of-state: derive from whichever mail_state we ended up with
-        mail_state = rec.get("mail_state", "")
-        rec["out_of_state"] = bool(mail_state and mail_state not in ("", "OH"))
+        if not rec.get("owner") and match.get("owner"):
+            rec["owner"] = match["owner"]
+        if not rec.get("legal") and match.get("parcel"):
+            rec["legal"] = match["parcel"]
+        rec["delinquent"]   = match.get("delinquent", False)
+        rec["delinq_amt"]   = match.get("delinq_amt", "")
+        rec["homestead"]    = match.get("homestead", False)
+        rec["appraised"]    = match.get("appraised", "")
+        rec["out_of_state"] = match.get("out_of_state", False)
+        rec["luc"]          = match.get("luc", "")
+        rec["luc_desc"]     = match.get("luc_desc", "")
 
     def _owner_name_lookup(self, owner_name: str) -> Optional[dict]:
         """Name-based parcel lookup for PRO records where we have no parcel number yet."""
@@ -1666,74 +1643,6 @@ class ParcelLookup:
     def _lookup_luc(self, parcel: str) -> str:
         return ""
 
-    def _treasurer_delinq_lookup(self, parcel_pin: str) -> dict:
-        """Query Cuyahoga County Treasurer delinquent-tax ArcGIS layer by parcel PIN.
-
-        Returns dict with keys: delinquent (bool), delinq_amt (str),
-        mail_addr, mail_city, mail_state, mail_zip.
-        Falls back to empty dict on any error so enrichment continues normally.
-        """
-        if not self._session:
-            return {}
-        # Normalise PIN — strip dashes/spaces, pad to 15 digits if needed
-        pin = re.sub(r"[\s\-]", "", parcel_pin)
-        if pin in self._delinq_cache:
-            return self._delinq_cache[pin]
-        try:
-            params = {
-                "where":            f"PARCEL_NO='{pin}'",
-                "outFields":        (
-                    "PARCEL_NO,OWNER_NAME,MAIL_ADDRESS,MAIL_CITY,"
-                    "MAIL_STATE,MAIL_ZIP,TOTAL_DUE,TAX_YEAR"
-                ),
-                "f":                "json",
-                "resultRecordCount": 1,
-                "returnGeometry":   "false",
-            }
-            r = self._session.get(TREASURER_DELINQ_URL, params=params, timeout=15)
-            if r.status_code != 200:
-                log.debug("Treasurer API HTTP %d for %s", r.status_code, pin)
-                self._delinq_cache[pin] = {}
-                return {}
-            data = r.json()
-            features = data.get("features") or []
-            if not features:
-                # Parcel not in delinquency layer → not delinquent
-                result = {
-                    "delinquent": False,
-                    "delinq_amt": "",
-                    "mail_addr":  "",
-                    "mail_city":  "",
-                    "mail_state": "",
-                    "mail_zip":   "",
-                }
-                self._delinq_cache[pin] = result
-                return result
-            attrs = features[0].get("attributes", {})
-            total_due = attrs.get("TOTAL_DUE") or 0
-            try:
-                total_due = float(total_due)
-            except (TypeError, ValueError):
-                total_due = 0.0
-            mail_state = (attrs.get("MAIL_STATE") or "OH").strip().upper()
-            result = {
-                "delinquent": total_due > 0,
-                "delinq_amt": f"{total_due:,.2f}" if total_due > 0 else "",
-                "mail_addr":  (attrs.get("MAIL_ADDRESS") or "").strip().title(),
-                "mail_city":  (attrs.get("MAIL_CITY")    or "").strip().title(),
-                "mail_state": mail_state,
-                "mail_zip":   str(attrs.get("MAIL_ZIP")  or "").strip(),
-            }
-            log.info("Treasurer delinq hit: %s → $%s delinquent=%s mail_state=%s",
-                     pin, result["delinq_amt"] or "0", result["delinquent"],
-                     mail_state)
-            self._delinq_cache[pin] = result
-            return result
-        except Exception as e:
-            log.warning("Treasurer delinq lookup failed for %s: %s", pin, e)
-            self._delinq_cache[pin] = {}
-            return {}
-
 
 # ===========================================================================
 # Scoring
@@ -1744,49 +1653,45 @@ class LeadScorer:
 
     @staticmethod
     def score(rec: dict, all_recs: list) -> tuple:
-        # Base 15 (was 30). Lower floor spreads the distribution so that
-        # single-signal leads land in the 40s and stacked leads reach 80-100.
-        flags, points = [], 15
+        flags, points = [], 30
         cat   = rec.get("cat", "")
         dtype = rec.get("doc_type", "")
         owner = rec.get("owner", "")
         amt   = rec.get("amount")
 
-        # --- Primary signal ---
-        if cat == "LP":      flags.append("Lis pendens");        points += 20  # was 10
-        if cat == "NOFC":    flags.append("Pre-foreclosure");    points += 25  # was 10
-        if cat == "TAXDEED": flags.append("Tax deed");           points += 25  # was 10
-        if cat == "JUD":     flags.append("Judgment lien");      points += 15  # was 10
+        if cat == "LP":      flags.append("Lis pendens");        points += 10
+        if cat == "NOFC":    flags.append("Pre-foreclosure");    points += 10
+        if cat == "TAXDEED": flags.append("Tax deed");           points += 10
+        if cat == "JUD":     flags.append("Judgment lien");      points += 10
         if cat == "CODE":
             flags.append("Code violation")
-            points += 10                                          # was 15
+            points += 15
             sev = rec.get("viol_severity", "")
             if sev == "high":
                 flags.append("Chief Approved violation")
                 points += 15
             elif sev == "medium":
-                points += 7
-        if cat == "CONDEMN": flags.append("Condemned property"); points += 15  # was 20
+                points += 5
+        if cat == "CONDEMN": flags.append("Condemned property"); points += 20
         if cat == "LIEN":
             if dtype in ("LNIRS", "LNFED", "LNCORPTX"): flags.append("Tax lien")
             elif dtype == "LNMECH": flags.append("Mechanic lien")
             elif dtype == "LNHOA":  flags.append("HOA lien")
             else: flags.append("Lien")
             points += 10
-        if cat == "PRO":   flags.append("Probate / estate"); points += 20  # was 10
+        if cat == "PRO":   flags.append("Probate / estate"); points += 10
         if cat == "RELLP": flags.append("Lis pendens");      points += 5
         if cat == "BK":
             chapter = rec.get("bk_chapter", "")
             flags.append(f"Bankruptcy Ch.{chapter}" if chapter else "Bankruptcy")
-            points += 20                                          # was 15
+            points += 15
             if rec.get("owns_property") is False:
                 flags.append("No property found")
-                points = min(points, 25)
+                points = min(points, 25)   # cap score — unconfirmed property owner
             elif rec.get("owns_property") is True:
                 flags.append("Property confirmed")
                 points += 10
 
-        # --- Cross-signal stacking bonuses ---
         norm = normalize_name(owner)
         if norm:
             owner_cats = {r["cat"] for r in all_recs
@@ -1796,12 +1701,10 @@ class LeadScorer:
             if owner_cats & {"NOFC", "LP"} and owner_cats & {"CODE", "CONDEMN"}:
                 flags.append("Foreclosure + violation"); points += 25
 
-        # --- Debt size ---
         if amt:
             if amt > 100_000: flags.append("High debt (>$100k)"); points += 15
-            elif amt > 50_000: points += 8
+            elif amt > 50_000: points += 10
 
-        # --- Recency ---
         try:
             dt = datetime.strptime(rec.get("filed", "").strip(), "%m/%d/%Y")
             if dt >= LeadScorer.WEEK_AGO:
@@ -1809,19 +1712,18 @@ class LeadScorer:
         except Exception:
             pass
 
-        # --- Enrichment signals (additive but not primary) ---
         if rec.get("prop_address") or rec.get("mail_address"):
-            flags.append("Address found"); points += 3           # was 5
+            flags.append("Address found"); points += 5
 
         if owner and re.search(r"\b(LLC|INC|CORP|LTD|TRUST|ESTATE)\b", owner, re.I):
             flags.append("LLC / corp owner"); points += 5
 
         if rec.get("delinquent"):
-            flags.append("Delinquent taxes"); points += 20       # was 15 — high signal now that it works
+            flags.append("Delinquent taxes"); points += 15
         if rec.get("out_of_state"):
-            flags.append("Out-of-state owner"); points += 15     # was 10 — high signal now that it works
+            flags.append("Out-of-state owner"); points += 10
         if rec.get("homestead") is False and rec.get("prop_address"):
-            flags.append("No homestead exemption"); points += 3  # was 5 — nearly universal, reduce weight
+            flags.append("No homestead exemption"); points += 5
 
         return min(100, max(0, points)), list(dict.fromkeys(flags))
 
