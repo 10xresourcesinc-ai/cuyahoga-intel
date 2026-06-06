@@ -1157,14 +1157,12 @@ class ProbateScraper:
 #   Grantor=24, Grantee=105, Date=267, DocNum=328, Parcel=530, Address=590
 
 _LP_COLS = {
-    # Column x-ranges from Cuyahoga County Recorder PDF (letter landscape ~792pt wide)
-    # Grantor | Grantee | DocType | Date | DocNum | Legal | ParcelID | Address
-    "grantor": (0,   102),
-    "grantee": (102, 205),
-    "date":    (269, 328),
-    "docnum":  (328, 407),
-    "parcel":  (495, 582),   # "Parcel ID" column — was (530,590) which missed it
-    "address": (582, 693),
+    "grantor": (24,  105),
+    "grantee": (105, 187),
+    "date":    (267, 328),
+    "docnum":  (328, 400),
+    "parcel":  (530, 590),
+    "address": (590, 654),
 }
 _LP_CUTOFF = datetime(2026, 1, 1)
 
@@ -1315,14 +1313,27 @@ class BankruptcyScraper:
         fetched = 0
         while next_url:
             try:
-                r = self._session.get(
-                    next_url,
-                    params=params if page == 1 else None,
-                    timeout=30
-                )
-                if r.status_code == 429:
-                    log.warning("CourtListener rate limited — stopping BK fetch")
+                resp = None
+                for attempt in range(3):
+                    try:
+                        resp = self._session.get(
+                            next_url,
+                            params=params if page == 1 else None,
+                            timeout=60,
+                        )
+                        break
+                    except Exception as te:
+                        log.warning("CourtListener timeout ch%s page %d attempt %d: %s",
+                                    chapter, page, attempt+1, te)
+                        time.sleep(15)
+                if resp is None:
+                    log.warning("CourtListener ch%s page %d — all retries failed", chapter, page)
                     break
+                r = resp
+                if r.status_code == 429:
+                    log.warning("CourtListener rate limited — sleeping 60s")
+                    time.sleep(60)
+                    continue
                 if r.status_code != 200:
                     log.warning("CourtListener HTTP %d for chapter %s: %s",
                                 r.status_code, chapter, r.text[:200])
@@ -1335,8 +1346,33 @@ class BankruptcyScraper:
                     if rec:
                         self.raw_records.append(rec)
                         fetched += 1
-                next_url = data.get("next")
-                page += 1
+                next_link = data.get("next")
+                if not next_link:
+                    break
+                # Stop at page 98 to avoid CourtListener's page 100 deep pagination block
+                if page >= 98:
+                    # Restart from oldest date in this batch
+                    dates = [item.get("date_filed","") for item in results if item.get("date_filed")]
+                    if dates:
+                        oldest = min(dates)
+                        log.info("BK ch%s hit page 98 — restarting from date %s", chapter, oldest)
+                        params = {
+                            "docket__court":           BK_COURT,
+                            "chapter":                 chapter,
+                            "docket__date_filed__gte": cutoff,
+                            "docket__date_filed__lte": oldest,
+                            "order_by":                "-docket__date_filed",
+                            "page_size":               100,
+                            "format":                  "json",
+                            "fields":                  "docket,chapter,date_filed",
+                        }
+                        next_url = f"{COURTLISTENER_BASE}/bankruptcy-information/"
+                        page = 1
+                    else:
+                        break
+                else:
+                    next_url = next_link
+                    page += 1
                 time.sleep(1)
             except Exception as e:
                 log.warning("CourtListener fetch failed (chapter %s): %s", chapter, e)
@@ -1959,6 +1995,29 @@ async def main():
             seen[key] = rec
     records = sorted(seen.values(), key=lambda r: r["score"], reverse=True)
     log.info("Unique records after dedup: %d", len(records))
+
+    # 9b. Delta flag — mark records not seen in previous run
+    prev_keys_file = REPO_ROOT / "data" / "prev_keys.json"
+    prev_keys = set()
+    if prev_keys_file.exists():
+        try:
+            prev_keys = set(json.load(open(prev_keys_file)))
+        except Exception:
+            pass
+    today_keys = []
+    for rec in records:
+        key = rec.get("doc_num") or rec.get("clerk_url") or ""
+        today_keys.append(key)
+        if key and key not in prev_keys:
+            if "New this run" not in rec.get("flags", []):
+                rec.setdefault("flags", []).insert(0, "New this run")
+    try:
+        prev_keys_file.parent.mkdir(parents=True, exist_ok=True)
+        json.dump(today_keys, open(prev_keys_file, "w"))
+    except Exception as e:
+        log.warning("Could not save prev_keys: %s", e)
+    new_count = sum(1 for r in records if "New this run" in r.get("flags", []))
+    log.info("New this run: %d records", new_count)
 
     # 10. Save
     with_addr = sum(1 for r in records if r.get("prop_address") or r.get("mail_address"))
