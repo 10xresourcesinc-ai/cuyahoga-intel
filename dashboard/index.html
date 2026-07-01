@@ -142,6 +142,7 @@ td{padding:9px 12px;vertical-align:middle;max-width:200px;overflow:hidden;text-o
     <div class="slabel">Filters</div>
     <div class="chip" id="addrChip"><span>Has address</span><span class="cnt" id="addrCnt">0</span></div>
     <div class="chip" id="newChip"><span>New this week</span><span class="cnt" id="newCnt">0</span></div>
+    <div class="chip" id="newMonthChip"><span>New this month</span><span class="cnt" id="newMonthCnt">0</span></div>
   </aside>
   <main>
     <div class="dropzone" id="dz">
@@ -187,7 +188,7 @@ td{padding:9px 12px;vertical-align:middle;max-width:200px;overflow:hidden;text-o
 if(typeof pdfjsLib!=="undefined"){pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";}
 
 var AUTO=[],MAN=[],filtered=[],page=1,PS=50;
-var cats=new Set(),minSc=0,addrOnly=false,newOnly=false,autoOnly=false,manOnly=false,sortK="score_d",qStr="";
+var cats=new Set(),minSc=0,addrOnly=false,newOnly=false,newMonthOnly=false,autoOnly=false,manOnly=false,sortK="score_d",qStr="";
 var CAT={LP:"Lis Pendens",NOFC:"Foreclosure",TAXDEED:"Tax Deed",JUD:"Judgment",LIEN:"Lien",PRO:"Probate",NOC:"NOC",RELLP:"Rel LP"};
 
 function getSaved(){try{return JSON.parse(localStorage.getItem("man_recs")||"[]");}catch(e){return[];}}
@@ -226,6 +227,7 @@ function render(){
   document.getElementById("manCnt").textContent=man;
   document.getElementById("addrCnt").textContent=all.filter(function(r){return r.prop_address||r.mail_address;}).length;
   document.getElementById("newCnt").textContent=all.filter(function(r){return (r.flags||[]).indexOf("New this week")>=0;}).length;
+  document.getElementById("newMonthCnt").textContent=all.filter(function(r){return (r.flags||[]).indexOf("New this month")>=0;}).length;
   buildCats(all);
   applyFilters();
 }
@@ -259,6 +261,7 @@ function applyFilters(){
   if(minSc>0)all=all.filter(function(r){return (r.score||0)>=minSc;});
   if(addrOnly)all=all.filter(function(r){return r.prop_address||r.mail_address;});
   if(newOnly)all=all.filter(function(r){return (r.flags||[]).indexOf("New this week")>=0;});
+  if(newMonthOnly)all=all.filter(function(r){return (r.flags||[]).indexOf("New this month")>=0||(r.flags||[]).indexOf("New this week")>=0;});
   if(autoOnly)all=all.filter(function(r){return r.source!=="Manual Upload";});
   if(manOnly)all=all.filter(function(r){return r.source==="Manual Upload";});
   if(qStr){var q=qStr.toLowerCase();all=all.filter(function(r){return (r.owner||"").toLowerCase().indexOf(q)>=0||(r.prop_address||"").toLowerCase().indexOf(q)>=0||(r.mail_address||"").toLowerCase().indexOf(q)>=0||(r.doc_num||"").toLowerCase().indexOf(q)>=0;});}
@@ -483,7 +486,7 @@ document.getElementById("q").addEventListener("input",function(e){qStr=e.target.
 document.getElementById("sortSel").addEventListener("change",function(e){sortK=e.target.value;page=1;applyFilters();});
 document.getElementById("sr").addEventListener("input",function(e){minSc=+e.target.value;document.getElementById("sv").textContent=minSc;page=1;applyFilters();});
 document.getElementById("resetBtn").onclick=function(){
-  cats.clear();minSc=0;addrOnly=false;newOnly=false;autoOnly=false;manOnly=false;qStr="";sortK="score_d";page=1;
+  cats.clear();minSc=0;addrOnly=false;newOnly=false;newMonthOnly=false;autoOnly=false;manOnly=false;qStr="";sortK="score_d";page=1;
   document.getElementById("q").value="";document.getElementById("sr").value=0;document.getElementById("sv").textContent="0";document.getElementById("sortSel").value="score_d";
   document.querySelectorAll("aside .chip").forEach(function(c){c.classList.remove("on");});
   var fc=document.querySelector("#catfilters .chip");if(fc)fc.classList.add("on");
@@ -493,6 +496,7 @@ document.getElementById("autoChip").onclick=function(){autoOnly=!autoOnly;manOnl
 document.getElementById("manChip").onclick=function(){manOnly=!manOnly;autoOnly=false;this.classList.toggle("on",manOnly);document.getElementById("autoChip").classList.remove("on");page=1;applyFilters();};
 document.getElementById("addrChip").onclick=function(){addrOnly=!addrOnly;this.classList.toggle("on",addrOnly);page=1;applyFilters();};
 document.getElementById("newChip").onclick=function(){newOnly=!newOnly;this.classList.toggle("on",newOnly);page=1;applyFilters();};
+document.getElementById("newMonthChip").onclick=function(){newMonthOnly=!newMonthOnly;this.classList.toggle("on",newMonthOnly);page=1;applyFilters();};
 
 function toast(msg,type){var t=document.getElementById("toast");t.textContent=msg;t.className="toast "+type+" show";setTimeout(function(){t.classList.remove("show");},3000);}
 
