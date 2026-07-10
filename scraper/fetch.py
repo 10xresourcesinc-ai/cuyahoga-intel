@@ -206,14 +206,6 @@ class SheriffScraper:
             return None
         case_num = case_m.group(1).replace(" ", "").upper()
 
-        # Only keep cases filed in 2025 or later — older cases (CV2019, CV2020 etc.)
-        # are just now reaching auction but represent stale leads filed years ago.
-        year_m = re.search(r'CV(\d{4})', case_num, re.I)
-        if year_m:
-            case_year = int(year_m.group(1))
-            if case_year < 2025:
-                return None
-
         att_m = re.search(
             r'Attorney\s*:\s*([A-Z][A-Z\s,\.]+?)(?=\s+Appraised|\s+Case\s*#|\s+\$)',
             text, re.I
@@ -351,38 +343,60 @@ class SheriffScraper:
 # Code Violation + Condemnation Scraper  (CODE / CONDEMN)
 # ===========================================================================
 
+# ---------------------------------------------------------------------------
+# Violation keyword → (category, label, severity)
+# Ordered by distress signal strength — highest converting types first
+# ---------------------------------------------------------------------------
 VIOL_TYPE_MAP = {
-    "TALL GRASS":      ("CODE_GRASS",   "Tall Grass / Weeds"),
-    "WEED":            ("CODE_GRASS",   "Tall Grass / Weeds"),
-    "OVERGROWN":       ("CODE_GRASS",   "Tall Grass / Weeds"),
-    "VEGETATION":      ("CODE_GRASS",   "Tall Grass / Weeds"),
-    "GARBAGE":         ("CODE_DEBRIS",  "Garbage / Debris"),
-    "DEBRIS":          ("CODE_DEBRIS",  "Garbage / Debris"),
-    "DUMP":            ("CODE_DEBRIS",  "Garbage / Debris"),
-    "TRASH":           ("CODE_DEBRIS",  "Garbage / Debris"),
-    "LITTER":          ("CODE_DEBRIS",  "Garbage / Debris"),
-    "JUNK":            ("CODE_DEBRIS",  "Garbage / Debris"),
-    "STRUCTURAL":      ("CODE_STRUCT",  "Structural Issue"),
-    "EXTERIOR":        ("CODE_STRUCT",  "Structural Issue"),
-    "FOUNDATION":      ("CODE_STRUCT",  "Structural Issue"),
-    "ROOF":            ("CODE_STRUCT",  "Structural Issue"),
-    "WALL":            ("CODE_STRUCT",  "Structural Issue"),
-    "WINDOW":          ("CODE_STRUCT",  "Structural Issue"),
-    "DOOR":            ("CODE_STRUCT",  "Structural Issue"),
-    "VACANT":          ("CODE_STRUCT",  "Vacant / Unsecured"),
-    "UNSECURED":       ("CODE_STRUCT",  "Vacant / Unsecured"),
-    "OPEN AND VACANT": ("CODE_STRUCT",  "Vacant / Unsecured"),
-    "NUISANCE":        ("CODE_NUISANCE","Property Nuisance"),
-    "INOPERABLE":      ("CODE_NUISANCE","Inoperable Vehicle"),
-    "VEHICLE":         ("CODE_NUISANCE","Inoperable Vehicle"),
-    "ELECTRICAL":      ("CODE_MECH",    "Electrical Issue"),
-    "PLUMBING":        ("CODE_MECH",    "Plumbing Issue"),
-    "MECHANICAL":      ("CODE_MECH",    "Mechanical Issue"),
-    "HVAC":            ("CODE_MECH",    "Mechanical Issue"),
-    "RODENT":          ("CODE_PEST",    "Rodent / Pest"),
-    "PEST":            ("CODE_PEST",    "Rodent / Pest"),
-    "RAT":             ("CODE_PEST",    "Rodent / Pest"),
-    "INSECT":          ("CODE_PEST",    "Rodent / Pest"),
+    # Tier 1 — Highest distress / best converting
+    "FIRE":            ("CODE_STRUCT",  "Fire Damage",              "high"),
+    "BURNED":          ("CODE_STRUCT",  "Fire Damage",              "high"),
+    "UNSAFE":          ("CODE_STRUCT",  "Unsafe Structure",         "high"),
+    "DANGEROUS":       ("CODE_STRUCT",  "Unsafe Structure",         "high"),
+    "CONDEMNED":       ("CODE_STRUCT",  "Condemned / Unsafe",       "high"),
+    "BOARDED":         ("CODE_STRUCT",  "Boarded / Vacant",         "high"),
+    "BOARD UP":        ("CODE_STRUCT",  "Boarded / Vacant",         "high"),
+    "OPEN AND VACANT": ("CODE_STRUCT",  "Vacant / Abandoned",       "high"),
+    "VACANT":          ("CODE_STRUCT",  "Vacant / Abandoned",       "high"),
+    "ABANDONED":       ("CODE_STRUCT",  "Vacant / Abandoned",       "high"),
+    "UNSECURED":       ("CODE_STRUCT",  "Vacant / Unsecured",       "high"),
+    "STRUCTURAL":      ("CODE_STRUCT",  "Structural Issue",         "high"),
+    "FOUNDATION":      ("CODE_STRUCT",  "Structural Issue",         "high"),
+    "ROOF":            ("CODE_STRUCT",  "Structural Issue",         "high"),
+    "EXTERIOR":        ("CODE_STRUCT",  "Structural Issue",         "high"),
+    "WALL":            ("CODE_STRUCT",  "Structural Issue",         "high"),
+    "DEMO":            ("CODE_STRUCT",  "Demolition Order",         "high"),
+    "DEMOLITION":      ("CODE_STRUCT",  "Demolition Order",         "high"),
+
+    # Tier 2 — Strong distress signals
+    "HEAVY DEBRIS":    ("CODE_DEBRIS",  "Heavy Debris / Trash",     "medium"),
+    "GARBAGE":         ("CODE_DEBRIS",  "Heavy Debris / Trash",     "medium"),
+    "DEBRIS":          ("CODE_DEBRIS",  "Heavy Debris / Trash",     "medium"),
+    "DUMP":            ("CODE_DEBRIS",  "Heavy Debris / Trash",     "medium"),
+    "TRASH":           ("CODE_DEBRIS",  "Heavy Debris / Trash",     "medium"),
+    "JUNK":            ("CODE_DEBRIS",  "Heavy Debris / Trash",     "medium"),
+    "SANITATION":      ("CODE_DEBRIS",  "Sanitation Issue",         "medium"),
+    "SEWAGE":          ("CODE_DEBRIS",  "Sanitation Issue",         "medium"),
+    "INOPERABLE":      ("CODE_NUISANCE","Inoperable Vehicle",       "medium"),
+    "VEHICLE":         ("CODE_NUISANCE","Inoperable Vehicle",       "medium"),
+    "NUISANCE":        ("CODE_NUISANCE","Property Nuisance",        "medium"),
+    "RODENT":          ("CODE_PEST",    "Rodent / Pest Infestation","medium"),
+    "RAT":             ("CODE_PEST",    "Rodent / Pest Infestation","medium"),
+    "PEST":            ("CODE_PEST",    "Rodent / Pest Infestation","medium"),
+    "ELECTRICAL":      ("CODE_MECH",    "Electrical Hazard",        "medium"),
+    "PLUMBING":        ("CODE_MECH",    "Plumbing Issue",           "medium"),
+
+    # Tier 3 — Lower distress (still include, just score lower)
+    "TALL GRASS":      ("CODE_GRASS",   "Overgrown / Tall Grass",   "low"),
+    "OVERGROWN":       ("CODE_GRASS",   "Overgrown / Tall Grass",   "low"),
+    "WEED":            ("CODE_GRASS",   "Overgrown / Tall Grass",   "low"),
+    "VEGETATION":      ("CODE_GRASS",   "Overgrown / Tall Grass",   "low"),
+    "LITTER":          ("CODE_DEBRIS",  "Litter / Minor Debris",    "low"),
+    "WINDOW":          ("CODE_STRUCT",  "Structural Issue",         "low"),
+    "DOOR":            ("CODE_STRUCT",  "Structural Issue",         "low"),
+    "MECHANICAL":      ("CODE_MECH",    "Mechanical Issue",         "low"),
+    "HVAC":            ("CODE_MECH",    "Mechanical Issue",         "low"),
+    "INSECT":          ("CODE_PEST",    "Pest Issue",               "low"),
 }
 
 def classify_violation(description: str) -> tuple:
@@ -524,39 +538,41 @@ class CodeViolationScraper:
             return None
 
         STATUS_MAP = {
-            "chief approved":                ("CODE_STRUCT", "Substandard Structure",       "high"),
-            "placard post/photo":            ("CODE_STRUCT", "Substandard Structure",       "high"),
-            "court judgment":                ("CODE_STRUCT", "Substandard Structure",       "high"),
-            "court stat":                    ("CODE_STRUCT", "Substandard Structure",       "high"),
-            "court date set":                ("CODE_STRUCT", "Substandard Structure",       "high"),
-            "search warrant executed":       ("CODE_STRUCT", "Substandard Structure",       "high"),
-            "summons approved":              ("CODE_STRUCT", "Substandard Structure",       "high"),
-            "prosecution packet to chief":   ("CODE_STRUCT", "Substandard Structure",       "high"),
-            "prosecution pkt created":       ("CODE_STRUCT", "Substandard Structure",       "high"),
-            "s/w packet sent to chief":      ("CODE_STRUCT", "Substandard Structure",       "high"),
-            "s/w packet sent to legal":      ("CODE_STRUCT", "Substandard Structure",       "high"),
-            "paralegal to law":              ("CODE_STRUCT", "Substandard Structure",       "high"),
-            "packet sent to legal":          ("CODE_STRUCT", "Substandard Structure",       "high"),
-            "filed w/clerk of courts":       ("CODE_STRUCT", "Substandard Structure",       "high"),
-            "lockbox processed":             ("CODE_STRUCT", "Substandard Structure",       "high"),
-            "boza denied":                   ("CODE_STRUCT", "Substandard Structure",       "high"),
-            "vn created & mailed":           ("CODE",        "Code Violation",              "medium"),
-            "open":                          ("CODE",        "Code Violation",              "medium"),
-            "pending":                       ("CODE",        "Code Violation",              "medium"),
-            "awaiting reinspection":         ("CODE",        "Code Violation",              "medium"),
-            "post&photo (p)":                ("CODE",        "Code Violation",              "medium"),
-            "demo file to chief":            ("CODE_STRUCT", "Substandard Structure",       "medium"),
-            "demo packet to legal":          ("CODE_STRUCT", "Substandard Structure",       "medium"),
-            "packet requested from chief":   ("CODE_STRUCT", "Substandard Structure",       "medium"),
-            "packet to chief for revision":  ("CODE_STRUCT", "Substandard Structure",       "medium"),
-            "packet to paralegal from chief":("CODE_STRUCT", "Substandard Structure",       "medium"),
-            "packet to chief for inspector": ("CODE_STRUCT", "Substandard Structure",       "medium"),
-            "to inspector for revision":     ("CODE_STRUCT", "Substandard Structure",       "medium"),
-            "post&photo (nc)":               ("CODE_STRUCT", "Substandard Structure",       "medium"),
-            "post&photo (c)":                ("CODE_STRUCT", "Substandard Structure",       "medium"),
-            "bbs appeal":                    ("CODE",        "Code Violation",              "medium"),
-            "bbs/boza appeal":               ("CODE",        "Code Violation",              "medium"),
-            "boza dismissed":                ("CODE",        "Code Violation",              "medium"),
+            # High distress — legal escalation, structural condemnation
+            "chief approved":                ("CODE_STRUCT", "Substandard Structure",   "high"),
+            "placard post/photo":            ("CODE_STRUCT", "Boarded / Placarded",     "high"),
+            "court judgment":                ("CODE_STRUCT", "Court Judgment",          "high"),
+            "court stat":                    ("CODE_STRUCT", "Court Judgment",          "high"),
+            "court date set":                ("CODE_STRUCT", "Court Date Set",          "high"),
+            "search warrant executed":       ("CODE_STRUCT", "Search Warrant",          "high"),
+            "summons approved":              ("CODE_STRUCT", "Summons Issued",          "high"),
+            "prosecution packet to chief":   ("CODE_STRUCT", "Prosecution Filed",       "high"),
+            "prosecution pkt created":       ("CODE_STRUCT", "Prosecution Filed",       "high"),
+            "s/w packet sent to chief":      ("CODE_STRUCT", "Search Warrant Filed",    "high"),
+            "s/w packet sent to legal":      ("CODE_STRUCT", "Search Warrant Filed",    "high"),
+            "paralegal to law":              ("CODE_STRUCT", "Referred to Legal",       "high"),
+            "packet sent to legal":          ("CODE_STRUCT", "Referred to Legal",       "high"),
+            "filed w/clerk of courts":       ("CODE_STRUCT", "Filed with Courts",       "high"),
+            "lockbox processed":             ("CODE_STRUCT", "Boarded / Placarded",     "high"),
+            "boza denied":                   ("CODE_STRUCT", "Appeal Denied",           "high"),
+            "demo file to chief":            ("CODE_STRUCT", "Demolition Order",        "high"),
+            "demo packet to legal":          ("CODE_STRUCT", "Demolition Order",        "high"),
+            # Medium distress — active violations, repeated inspections
+            "awaiting reinspection":         ("CODE",        "Repeated Violation",      "medium"),
+            "post&photo (nc)":               ("CODE_STRUCT", "Non-Compliant / Photo",   "medium"),
+            "post&photo (p)":                ("CODE_STRUCT", "Posted / Photo",          "medium"),
+            "post&photo (c)":                ("CODE_STRUCT", "Posted / Compliant",      "medium"),
+            "vn created & mailed":           ("CODE",        "Violation Notice Sent",   "medium"),
+            "open":                          ("CODE",        "Open Violation",          "medium"),
+            "pending":                       ("CODE",        "Pending Inspection",      "medium"),
+            "packet requested from chief":   ("CODE_STRUCT", "Substandard Structure",   "medium"),
+            "packet to chief for revision":  ("CODE_STRUCT", "Substandard Structure",   "medium"),
+            "packet to paralegal from chief":("CODE_STRUCT", "Substandard Structure",   "medium"),
+            "packet to chief for inspector": ("CODE_STRUCT", "Substandard Structure",   "medium"),
+            "to inspector for revision":     ("CODE_STRUCT", "Substandard Structure",   "medium"),
+            "bbs appeal":                    ("CODE",        "Appeal Pending",          "medium"),
+            "bbs/boza appeal":               ("CODE",        "Appeal Pending",          "medium"),
+            "boza dismissed":                ("CODE",        "Appeal Dismissed",        "medium"),
         }
         s_lower = status.lower().strip()
         if s_lower in STATUS_MAP:
@@ -1669,15 +1685,34 @@ class LeadScorer:
         if cat == "NOFC":    flags.append("Pre-foreclosure");    points += 10
         if cat == "TAXDEED": flags.append("Tax deed");           points += 10
         if cat == "JUD":     flags.append("Judgment lien");      points += 10
-        if cat == "CODE":
-            flags.append("Code violation")
-            points += 15
+        if cat in ("CODE", "CODE_STRUCT", "CODE_DEBRIS", "CODE_NUISANCE",
+                    "CODE_PEST", "CODE_MECH", "CODE_GRASS"):
+            viol_label = rec.get("cat_label") or rec.get("viol_desc") or "Code violation"
             sev = rec.get("viol_severity", "")
-            if sev == "high":
-                flags.append("Chief Approved violation")
-                points += 15
-            elif sev == "medium":
-                points += 5
+            # Tier 1 — highest distress violation types
+            high_labels = {"Fire Damage", "Unsafe Structure", "Condemned / Unsafe",
+                           "Boarded / Vacant", "Vacant / Abandoned", "Demolition Order",
+                           "Boarded / Placarded", "Court Judgment", "Referred to Legal",
+                           "Filed with Courts", "Search Warrant"}
+            # Tier 2 — strong distress
+            medium_labels = {"Heavy Debris / Trash", "Sanitation Issue",
+                             "Rodent / Pest Infestation", "Inoperable Vehicle",
+                             "Repeated Violation", "Non-Compliant / Photo",
+                             "Electrical Hazard", "Structural Issue", "Substandard Structure",
+                             "Prosecution Filed", "Summons Issued", "Appeal Denied"}
+            if viol_label in high_labels or sev == "high":
+                flags.append(viol_label)
+                points += 30
+            elif viol_label in medium_labels or sev == "medium":
+                flags.append(viol_label)
+                points += 18
+            else:
+                flags.append("Code violation")
+                points += 8
+
+            # Repeated violation bonus — "awaiting reinspection" means they failed once already
+            if "repeated" in viol_label.lower() or "reinspect" in rec.get("viol_status","").lower():
+                flags.append("Repeated violation"); points += 10
         if cat == "CONDEMN": flags.append("Condemned property"); points += 20
         if cat == "LIEN":
             if dtype in ("LNIRS", "LNFED", "LNCORPTX"): flags.append("Tax lien")
