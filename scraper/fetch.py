@@ -1671,7 +1671,7 @@ class ParcelLookup:
 # ===========================================================================
 
 class LeadScorer:
-    WEEK_AGO = datetime.now() - timedelta(days=7)
+    WEEK_AGO = (datetime.now() - timedelta(days=7)).date()
 
     @staticmethod
     def score(rec: dict, all_recs: list) -> tuple:
@@ -1747,7 +1747,7 @@ class LeadScorer:
             elif amt > 50_000: points += 10
 
         try:
-            dt = datetime.strptime(rec.get("filed", "").strip(), "%m/%d/%Y")
+            dt = datetime.strptime(rec.get("filed", "").strip(), "%m/%d/%Y").date()
             if dt >= LeadScorer.WEEK_AGO:
                 flags.append("New this week"); points += 5
         except Exception:
