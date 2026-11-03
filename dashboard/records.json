@@ -1,9 +1,9 @@
 {
-  "fetched_at": "2026-11-02T16:47:07.035582+00:00",
+  "fetched_at": "2026-11-03T14:51:13.773434+00:00",
   "source": "Cuyahoga Court Docket + Code Violations + Probate + Bankruptcy + Manual Uploads",
   "date_range": {
-    "from": "10/03/2026",
-    "to": "11/02/2026"
+    "from": "10/04/2026",
+    "to": "11/03/2026"
   },
   "total": 812,
   "with_address": 812,
@@ -2346,7 +2346,7 @@
       "cat": "CONDEMN",
       "cat_label": "Condemned Property",
       "filed": "09/08/2026",
-      "owner": "MATOS HOME RENOVATION & RENTALS LLC",
+      "owner": "UNITED ONE RE LLC",
       "grantee": "",
       "amount": null,
       "legal": "007-07-059",
